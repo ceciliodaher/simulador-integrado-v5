@@ -198,69 +198,141 @@ const ModernUI = (function() {
         }, 500);
     }
 
-    // ===== TOOLTIPS MODERNOS ===== //
+    // ===== TOOLTIPS MODERNOS CORRIGIDOS ===== //
+    // ===== TOOLTIPS MODERNOS CORRIGIDOS ===== //
     function setupTooltips() {
+        let currentTooltip = null;
+        let tooltipTimeout = null;
+
+        // Função para mostrar tooltip
+        function showModernTooltip(e, text, targetElement) {
+            hideModernTooltip(); // Remove tooltip anterior
+
+            const tooltip = document.createElement('div');
+            tooltip.className = 'modern-tooltip';
+            tooltip.textContent = text;
+            tooltip.style.cssText = `
+                position: fixed;
+                background: rgba(15, 23, 42, 0.95);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 8px;
+                font-size: 0.875rem;
+                font-weight: 500;
+                z-index: 10000;
+                pointer-events: none;
+                opacity: 0;
+                transform: translateY(5px);
+                transition: opacity 200ms ease, transform 200ms ease;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+                max-width: 250px;
+                word-wrap: break-word;
+            `;
+
+            document.body.appendChild(tooltip);
+            currentTooltip = tooltip;
+
+            // Posicionar tooltip
+            updateTooltipPosition(e, tooltip);
+
+            // Animar entrada
+            requestAnimationFrame(() => {
+                if (tooltip.parentNode) {
+                    tooltip.style.opacity = '1';
+                    tooltip.style.transform = 'translateY(0)';
+                }
+            });
+        }
+
+        // Função para atualizar posição do tooltip
+        function updateTooltipPosition(e, tooltip) {
+            if (!tooltip) return;
+
+            const rect = tooltip.getBoundingClientRect();
+            const margin = 10;
+
+            let left = e.clientX - rect.width / 2;
+            let top = e.clientY - rect.height - margin;
+
+            // Ajustar se sair da tela pela direita
+            if (left + rect.width > window.innerWidth - margin) {
+                left = window.innerWidth - rect.width - margin;
+            }
+
+            // Ajustar se sair da tela pela esquerda
+            if (left < margin) {
+                left = margin;
+            }
+
+            // Ajustar se sair da tela por cima
+            if (top < margin) {
+                top = e.clientY + margin; // Mostrar abaixo do cursor
+            }
+
+            tooltip.style.left = `${left}px`;
+            tooltip.style.top = `${top}px`;
+        }
+
+        // Função para esconder tooltip
+        function hideModernTooltip() {
+            if (currentTooltip) {
+                currentTooltip.style.opacity = '0';
+                currentTooltip.style.transform = 'translateY(5px)';
+
+                setTimeout(() => {
+                    if (currentTooltip && currentTooltip.parentNode) {
+                        currentTooltip.parentNode.removeChild(currentTooltip);
+                    }
+                    currentTooltip = null;
+                }, 200);
+            }
+        }
+
+        // Configurar tooltips para elementos existentes
         document.querySelectorAll('[title], [data-tooltip]').forEach(element => {
             const text = element.getAttribute('title') || element.getAttribute('data-tooltip');
             if (text) {
                 element.removeAttribute('title'); // Remove tooltip padrão
 
+                // Evento de entrada do mouse
                 element.addEventListener('mouseenter', function(e) {
-                    showModernTooltip(e, text);
+                    // Limpa timeout anterior se existir
+                    if (tooltipTimeout) {
+                        clearTimeout(tooltipTimeout);
+                        tooltipTimeout = null;
+                    }
+
+                    // Remove tooltip anterior
+                    hideModernTooltip();
+
+                    // Cria novo tooltip após pequeno delay
+                    tooltipTimeout = setTimeout(() => {
+                        showModernTooltip(e, text, element);
+                    }, 300);
                 });
 
+                // Evento de saída do mouse
                 element.addEventListener('mouseleave', function() {
+                    // Cancela criação do tooltip se ainda não foi criado
+                    if (tooltipTimeout) {
+                        clearTimeout(tooltipTimeout);
+                        tooltipTimeout = null;
+                    }
+
+                    // Remove tooltip existente
                     hideModernTooltip();
+                });
+
+                // Evento de movimento do mouse para reposicionar
+                element.addEventListener('mousemove', function(e) {
+                    if (currentTooltip) {
+                        updateTooltipPosition(e, currentTooltip);
+                    }
                 });
             }
         });
-    }
-
-    function showModernTooltip(e, text) {
-        hideModernTooltip(); // Remove tooltip existente
-
-        const tooltip = document.createElement('div');
-        tooltip.className = 'modern-tooltip';
-        tooltip.textContent = text;
-        tooltip.style.cssText = `
-            position: fixed;
-            background: rgba(15, 23, 42, 0.95);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            z-index: 10000;
-            pointer-events: none;
-            opacity: 0;
-            transform: translateY(5px);
-            transition: opacity 200ms ease, transform 200ms ease;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-        `;
-
-        document.body.appendChild(tooltip);
-
-        // Posicionar tooltip
-        const rect = tooltip.getBoundingClientRect();
-        tooltip.style.left = `${e.clientX - rect.width / 2}px`;
-        tooltip.style.top = `${e.clientY - rect.height - 10}px`;
-
-        // Animar entrada
-        requestAnimationFrame(() => {
-            tooltip.style.opacity = '1';
-            tooltip.style.transform = 'translateY(0)';
-        });
-    }
-
-    function hideModernTooltip() {
-        const existing = document.querySelector('.modern-tooltip');
-        if (existing) {
-            existing.style.opacity = '0';
-            existing.style.transform = 'translateY(5px)';
-            setTimeout(() => existing.remove(), 200);
-        }
     }
 
     // ===== EFEITO PARALLAX ===== //

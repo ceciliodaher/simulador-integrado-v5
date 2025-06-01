@@ -125,9 +125,6 @@ window.ChartManager = (function() {
     function renderizarGraficosDetalhamento(resultado) {
         console.log('ChartManager: Renderizando gráficos de detalhamento');
         
-        // ✅ ADICIONAR ESTA LINHA:
-        const canvas = document.getElementById('grafico-fluxo-caixa');
-        
         if (!canvas) {
             console.error('Elemento canvas para gráfico de fluxo de caixa não encontrado');
             return;
@@ -1157,6 +1154,12 @@ window.ChartManager = (function() {
      */
     function renderizarGraficoEstrategias(resultadoEstrategias, impactoBase) {
         console.log('ChartManager: Iniciando renderização de gráficos de estratégias...');
+        
+        // Destruir gráfico anterior se existir
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) {
+            existingChart.destroy();
+        }
 
         // Verificar se temos os elementos de canvas necessários
         const canvasEfetividade = document.getElementById('grafico-efetividade-estrategias');
