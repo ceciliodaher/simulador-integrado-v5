@@ -32,42 +32,106 @@ window.ChartManager = (function() {
     }
     
     /**
+     * Destrói um gráfico de forma segura e completa
+     * @param {string} canvasId - ID do canvas
+     * @returns {boolean} - Se a destruição foi bem-sucedida
+     */
+    function destruirGraficoSeguro(canvasId) {
+        try {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) {
+                console.warn(`Canvas ${canvasId} não encontrado`);
+                return false;
+            }
+
+            // Método 1: Usar Chart.getChart()
+            let existingChart = Chart.getChart(canvas);
+            if (existingChart) {
+                existingChart.destroy();
+                console.log(`Gráfico ${canvasId} destruído via Chart.getChart()`);
+            }
+
+            // Método 2: Verificar se há instância no registro interno
+            if (_charts[canvasId.replace('grafico-', '')]) {
+                _charts[canvasId.replace('grafico-', '')].destroy();
+                delete _charts[canvasId.replace('grafico-', '')];
+                console.log(`Gráfico ${canvasId} destruído via _charts`);
+            }
+
+            // Método 3: Verificar todas as instâncias ativas do Chart.js
+            Chart.instances.forEach((instance, index) => {
+                if (instance.canvas && instance.canvas.id === canvasId) {
+                    instance.destroy();
+                    console.log(`Gráfico ${canvasId} destruído via Chart.instances[${index}]`);
+                }
+            });
+
+            // Método 4: Limpar completamente o canvas
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // Verificação final
+            const finalCheck = Chart.getChart(canvas);
+            if (finalCheck) {
+                console.error(`ERRO: Gráfico ${canvasId} ainda existe após destruição`);
+                return false;
+            }
+
+            console.log(`Canvas ${canvasId} completamente limpo`);
+            return true;
+
+        } catch (error) {
+            console.error(`Erro crítico ao destruir gráfico ${canvasId}:`, error);
+            return false;
+        }
+    }
+    
+    /**
+     * Aguarda o canvas estar disponível para uso
+     * @param {string} canvasId - ID do canvas
+     * @param {number} maxTentativas - Máximo de tentativas
+     * @returns {Promise<boolean>} - Se o canvas está disponível
+     */
+    function aguardarCanvasDisponivel(canvasId, maxTentativas = 10) {
+        return new Promise((resolve) => {
+            let tentativas = 0;
+
+            const verificar = () => {
+                tentativas++;
+                const canvas = document.getElementById(canvasId);
+
+                if (!canvas) {
+                    console.error(`Canvas ${canvasId} não existe no DOM`);
+                    resolve(false);
+                    return;
+                }
+
+                const existingChart = Chart.getChart(canvas);
+
+                if (!existingChart) {
+                    console.log(`Canvas ${canvasId} disponível após ${tentativas} tentativas`);
+                    resolve(true);
+                } else if (tentativas >= maxTentativas) {
+                    console.error(`Canvas ${canvasId} ainda ocupado após ${maxTentativas} tentativas`);
+                    resolve(false);
+                } else {
+                    console.log(`Canvas ${canvasId} ainda ocupado, tentativa ${tentativas}/${maxTentativas}`);
+                    setTimeout(verificar, 100);
+                }
+            };
+
+            verificar();
+        });
+    }
+    
+    /**
      * Renderizar todos os gráficos com base nos resultados da simulação
      * @param {Object} resultados - Resultados da simulação
      */
-    function renderizarGraficos(resultados) {
+    async function renderizarGraficos(resultados) {
         console.log('Renderizando gráficos com os resultados:', resultados);
-        
-        const canvas = document.getElementById('grafico-fluxo-caixa');
-        if (!canvas) {
-            console.error('Elemento canvas para gráfico de fluxo de caixa não encontrado');
-            return;
-        }
-
-        // ADICIONAR ESTAS LINHAS:
-        const existingChart = Chart.getChart(canvas);
-        if (existingChart) {
-            existingChart.destroy();
-        }
-
-        // Ajustar as configurações de margem
-        const configPadrao = {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'top',
-                }
-            },
-            layout: {
-                padding: {
-                    left: 10,
-                    right: 20,
-                    top: 0,
-                    bottom: 10
-                }
-            }
-        };
 
         if (!resultados || !resultados.impactoBase) {
             console.error('Resultados inválidos para renderização de gráficos');
@@ -75,43 +139,33 @@ window.ChartManager = (function() {
         }
 
         try {
-            // Verificar se temos a estrutura de projeção temporal completa
-            const temProjecaoCompleta = resultados.projecaoTemporal && 
-                                       resultados.projecaoTemporal.comparacaoRegimes && 
-                                       resultados.projecaoTemporal.comparacaoRegimes.anos && 
-                                       resultados.projecaoTemporal.comparacaoRegimes.anos.length > 0;
+            // Renderizar gráficos sequencialmente para evitar conflitos
+            console.log('Renderizando gráfico de fluxo de caixa...');
+            await renderizarGraficoFluxoCaixa(resultados);
 
-            // Renderizar gráfico de fluxo de caixa
-            renderizarGraficoFluxoCaixa(resultados);
+            console.log('Renderizando gráfico de capital de giro...');
+            await renderizarGraficoCapitalGiro(resultados);
 
-            // Renderizar gráfico de capital de giro
-            renderizarGraficoCapitalGiro(resultados);
-            
-            renderizarGraficoSensibilidade(resultados);
-            
-            // Renderizar gráficos de detalhamento
-            renderizarGraficosDetalhamento(resultados);
+            // Renderizar outros gráficos com delay
+            setTimeout(() => {
+                console.log('Renderizando gráficos adicionais...');
 
-            // Renderizar gráfico de projeção apenas se tivermos dados suficientes
-            if (temProjecaoCompleta) {
-                renderizarGraficoProjecao(resultados);
-            } else {
-                console.warn('Dados insuficientes para renderizar gráfico de projeção temporal');
-                // Limpar o canvas para evitar exibir gráficos obsoletos
-                const canvasProjecao = document.getElementById('grafico-projecao');
-                if (canvasProjecao && _charts.projecao) {
-                    _charts.projecao.destroy();
-                    delete _charts.projecao;
+                const temProjecaoCompleta = resultados.projecaoTemporal && 
+                                           resultados.projecaoTemporal.comparacaoRegimes && 
+                                           resultados.projecaoTemporal.comparacaoRegimes.anos && 
+                                           resultados.projecaoTemporal.comparacaoRegimes.anos.length > 0;
+
+                if (temProjecaoCompleta) {
+                    renderizarGraficoProjecao(resultados);
                 }
-            }
 
-            // Renderizar gráfico de decomposição
-            renderizarGraficoDecomposicao(resultados);
+                renderizarGraficoDecomposicao(resultados);
+                renderizarGraficoSensibilidade(resultados);
 
-            // Renderizar gráfico de sensibilidade
-            renderizarGraficoSensibilidade(resultados);
+            }, 300);
 
-            console.log('Todos os gráficos renderizados com sucesso');
+            console.log('Gráficos principais renderizados com sucesso');
+
         } catch (erro) {
             console.error('Erro ao renderizar gráficos:', erro);
         }
@@ -120,8 +174,7 @@ window.ChartManager = (function() {
     /**
      * Renderizar gráfico de fluxo de caixa
      * @param {Object} resultados - Resultados da simulação
-     */
-    
+     */    
     function renderizarGraficosDetalhamento(resultado) {
         console.log('ChartManager: Renderizando gráficos de detalhamento');
         
@@ -393,295 +446,311 @@ window.ChartManager = (function() {
         console.log('Gráficos de detalhamento renderizados com sucesso');
     }
     
-    function renderizarGraficoFluxoCaixa(resultados) {
-        const canvas = document.getElementById('grafico-fluxo-caixa');
+    async function renderizarGraficoFluxoCaixa(resultados) {
+        const canvasId = 'grafico-fluxo-caixa';
+        const canvas = document.getElementById(canvasId);
+
         if (!canvas) {
             console.error('Elemento canvas para gráfico de fluxo de caixa não encontrado');
             return;
         }
-        
-        // ADICIONAR ESTAS LINHAS:
-        const existingChart = Chart.getChart(canvas);
-        if (existingChart) {
-            existingChart.destroy();
+
+        console.log('Iniciando renderização do gráfico de fluxo de caixa...');
+
+        // Destruição segura e aguardo de disponibilidade
+        destruirGraficoSeguro(canvasId);
+
+        const canvasDisponivel = await aguardarCanvasDisponivel(canvasId);
+        if (!canvasDisponivel) {
+            console.error('Canvas não ficou disponível para gráfico de fluxo de caixa');
+            return;
         }
 
-        // Destruir gráfico anterior se existir
-        if (_charts.fluxoCaixa) {
-            _charts.fluxoCaixa.destroy();
-        }
+        // Aguardar um pouco antes de criar o novo gráfico
+        setTimeout(() => {
+            try {
+                // Obter o ano selecionado para visualização
+                const selectAnoVisualizacao = document.getElementById('ano-visualizacao');
+                const anoSelecionado = selectAnoVisualizacao ? parseInt(selectAnoVisualizacao.value) : 
+                                      (resultados.projecaoTemporal?.parametros?.anoInicial || 2026);
 
-        // Obter o ano selecionado para visualização
-        const selectAnoVisualizacao = document.getElementById('ano-visualizacao');
-        const anoSelecionado = selectAnoVisualizacao ? parseInt(selectAnoVisualizacao.value) : 
-                              (resultados.projecaoTemporal?.parametros?.anoInicial || 2026);
+                // Preparar dados para o gráfico
+                let resultadoAtual, resultadoSplitPayment, resultadoIVASemSplit;
 
-        // Preparar dados para o gráfico
-        let resultadoAtual, resultadoSplitPayment, resultadoIVASemSplit;
+                // Verificar se temos dados do ano específico ou usar impactoBase
+                if (resultados.projecaoTemporal?.resultadosAnuais && 
+                    resultados.projecaoTemporal.resultadosAnuais[anoSelecionado]) {
 
-        // Verificar se temos dados do ano específico ou usar impactoBase
-        if (resultados.projecaoTemporal?.resultadosAnuais && 
-            resultados.projecaoTemporal.resultadosAnuais[anoSelecionado]) {
-
-            const resultadoAno = resultados.projecaoTemporal.resultadosAnuais[anoSelecionado];
-            resultadoAtual = resultadoAno.resultadoAtual;
-            resultadoSplitPayment = resultadoAno.resultadoSplitPayment;
-            resultadoIVASemSplit = resultadoAno.resultadoIVASemSplit;
-        } else {
-            // Fallback para impactoBase se não houver dados do ano específico
-            resultadoAtual = resultados.impactoBase.resultadoAtual;
-            resultadoSplitPayment = resultados.impactoBase.resultadoSplitPayment;
-            resultadoIVASemSplit = resultados.impactoBase.resultadoIVASemSplit;
-        }
-
-        // Extrair dados dos resultados com validação
-        const dadosSimulacao = resultados.dadosUtilizados || {};
-        const faturamento = dadosSimulacao.empresa?.faturamento || 0;
-        const aliquota = dadosSimulacao.parametrosFiscais?.aliquota || 0;
-        const valorImposto = faturamento * aliquota;
-
-        // Regime Atual
-        const receitaAtual = faturamento;
-        const impostosAtual = resultadoAtual?.impostos?.total || valorImposto;
-        const liquidoAtual = receitaAtual - impostosAtual;
-
-        // Regime IVA sem Split Payment
-        const receitaIVASemSplit = faturamento;
-        const impostosIVASemSplit = resultadoIVASemSplit?.impostos?.total || valorImposto;
-        const liquidoIVASemSplit = receitaIVASemSplit - impostosIVASemSplit;
-
-        // Regime Split Payment
-        const percentualImplementacao = resultadoSplitPayment?.percentualImplementacao || 0.1;
-        const impostosIVAComSplit = resultadoSplitPayment?.impostos?.total || valorImposto;
-        const impostoDireto = impostosIVAComSplit * percentualImplementacao;
-        const impostoPosterior = impostosIVAComSplit - impostoDireto;
-        const liquidoSplit = faturamento - impostosIVAComSplit;
-
-        // Criar dados para o gráfico
-        const data = {
-            labels: ['Regime Atual', 'IVA sem Split', 'IVA com Split'],
-            datasets: [
-                {
-                    label: 'Recebimento Líquido',
-                    data: [liquidoAtual, liquidoIVASemSplit, liquidoSplit],
-                    backgroundColor: 'rgba(75, 192, 192, 0.7)',
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Imposto Recolhido Posteriormente',
-                    data: [impostosAtual, impostosIVASemSplit, impostoPosterior],
-                    backgroundColor: 'rgba(255, 206, 86, 0.7)',
-                    borderColor: 'rgba(255, 206, 86, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Imposto Recolhido Diretamente',
-                    data: [0, 0, impostoDireto],
-                    backgroundColor: 'rgba(255, 99, 132, 0.7)',
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    borderWidth: 1
+                    const resultadoAno = resultados.projecaoTemporal.resultadosAnuais[anoSelecionado];
+                    resultadoAtual = resultadoAno.resultadoAtual;
+                    resultadoSplitPayment = resultadoAno.resultadoSplitPayment;
+                    resultadoIVASemSplit = resultadoAno.resultadoIVASemSplit;
+                } else {
+                    // Fallback para impactoBase
+                    resultadoAtual = resultados.impactoBase.resultadoAtual;
+                    resultadoSplitPayment = resultados.impactoBase.resultadoSplitPayment;
+                    resultadoIVASemSplit = resultados.impactoBase.resultadoIVASemSplit;
                 }
-            ]
-        };
 
-        // Configurar opções do gráfico
-        const options = {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `Comparação de Fluxo de Caixa (${anoSelecionado})`,
-                    font: {
-                        size: 16
-                    }
-                },
-                tooltip: {
-                    mode: 'index',
-                    intersect: false,
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
+                // Extrair dados dos resultados com validação
+                const dadosSimulacao = resultados.dadosUtilizados || {};
+                const faturamento = dadosSimulacao.empresa?.faturamento || 0;
+
+                // Regime Atual
+                const receitaAtual = faturamento;
+                const impostosAtual = resultadoAtual?.impostos?.total || 0;
+                const liquidoAtual = receitaAtual - impostosAtual;
+
+                // Regime IVA sem Split Payment
+                const receitaIVASemSplit = faturamento;
+                const impostosIVASemSplit = resultadoIVASemSplit?.impostos?.total || 0;
+                const liquidoIVASemSplit = receitaIVASemSplit - impostosIVASemSplit;
+
+                // Regime Split Payment
+                const impostosIVAComSplit = resultadoSplitPayment?.impostos?.total || 0;
+                const percentualImplementacao = resultadoSplitPayment?.percentualImplementacao || 0.1;
+                const impostoDireto = impostosIVAComSplit * percentualImplementacao;
+                const impostoPosterior = impostosIVAComSplit - impostoDireto;
+                const liquidoSplit = faturamento - impostosIVAComSplit;
+
+                // Criar dados para o gráfico
+                const data = {
+                    labels: ['Regime Atual', 'IVA sem Split', 'IVA com Split'],
+                    datasets: [
+                        {
+                            label: 'Recebimento Líquido',
+                            data: [liquidoAtual, liquidoIVASemSplit, liquidoSplit],
+                            backgroundColor: 'rgba(75, 192, 192, 0.7)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Imposto Recolhido Posteriormente',
+                            data: [impostosAtual, impostosIVASemSplit, impostoPosterior],
+                            backgroundColor: 'rgba(255, 206, 86, 0.7)',
+                            borderColor: 'rgba(255, 206, 86, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Imposto Recolhido Diretamente',
+                            data: [0, 0, impostoDireto],
+                            backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                };
+
+                // Configurar opções do gráfico
+                const options = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Comparação de Fluxo de Caixa (${anoSelecionado})`,
+                            font: { size: 16 }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += new Intl.NumberFormat('pt-BR', {
+                                            style: 'currency',
+                                            currency: 'BRL'
+                                        }).format(context.parsed.y);
+                                    }
+                                    return label;
+                                }
                             }
-                            if (context.parsed.y !== null) {
-                                label += new Intl.NumberFormat('pt-BR', {
-                                    style: 'currency',
-                                    currency: 'BRL'
-                                }).format(context.parsed.y);
+                        },
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true },
+                        y: {
+                            stacked: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return new Intl.NumberFormat('pt-BR', {
+                                        style: 'currency',
+                                        currency: 'BRL',
+                                        maximumFractionDigits: 0
+                                    }).format(value);
+                                }
                             }
-                            return label;
                         }
                     }
-                },
-                legend: {
-                    position: 'bottom'
-                }
-            },
-            scales: {
-                x: {
-                    stacked: true
-                },
-                y: {
-                    stacked: true,
-                    ticks: {
-                        callback: function(value) {
-                            return new Intl.NumberFormat('pt-BR', {
-                                style: 'currency',
-                                currency: 'BRL',
-                                maximumFractionDigits: 0
-                            }).format(value);
-                        }
-                    }
-                }
+                };
+
+                // Criar o gráfico
+                _charts.fluxoCaixa = new Chart(canvas, {
+                    type: 'bar',
+                    data: data,
+                    options: options
+                });
+
+                console.log('Gráfico de fluxo de caixa criado com sucesso');
+
+            } catch (error) {
+                console.error('Erro ao criar gráfico de fluxo de caixa:', error);
             }
-        };
-
-        // Criar o gráfico
-        _charts.fluxoCaixa = new Chart(canvas, {
-            type: 'bar',
-            data: data,
-            options: options
-        });
+        }, 50);
     }
     
     /**
      * Renderizar gráfico de capital de giro
      * @param {Object} resultados - Resultados da simulação
      */
-    function renderizarGraficoCapitalGiro(resultados) {
-        const canvas = document.getElementById('grafico-capital-giro');
+    async function renderizarGraficoCapitalGiro(resultados) {
+        const canvasId = 'grafico-capital-giro';
+        const canvas = document.getElementById(canvasId);
+
         if (!canvas) {
             console.error('Elemento canvas para gráfico de capital de giro não encontrado');
             return;
         }
-        
-        // ADICIONAR ESTAS LINHAS:
-        const existingChart = Chart.getChart(canvas);
-        if (existingChart) {
-            existingChart.destroy();
+
+        console.log('Iniciando renderização do gráfico de capital de giro...');
+
+        // Destruição segura e aguardo de disponibilidade
+        destruirGraficoSeguro(canvasId);
+
+        const canvasDisponivel = await aguardarCanvasDisponivel(canvasId);
+        if (!canvasDisponivel) {
+            console.error('Canvas não ficou disponível para gráfico de capital de giro');
+            return;
         }
 
-        // Destruir gráfico anterior se existir
-        if (_charts.capitalGiro) {
-            _charts.capitalGiro.destroy();
-        }
+        try {
+            // Obter o ano selecionado para visualização
+            const selectAnoVisualizacao = document.getElementById('ano-visualizacao');
+            const anoSelecionado = selectAnoVisualizacao ? parseInt(selectAnoVisualizacao.value) : 
+                                  (resultados.projecaoTemporal?.parametros?.anoInicial || 2026);
 
-        // Obter o ano selecionado para visualização
-        const selectAnoVisualizacao = document.getElementById('ano-visualizacao');
-        const anoSelecionado = selectAnoVisualizacao ? parseInt(selectAnoVisualizacao.value) : 
-                              (resultados.projecaoTemporal?.parametros?.anoInicial || 2026);
+            // Extrair dados do resultado do ano selecionado ou do impactoBase
+            let capitalGiroAtual, capitalGiroIVASemSplit, capitalGiroSplit, diferencaCapitalGiro;
 
-        // Extrair dados do resultado do ano selecionado ou do impactoBase
-        let capitalGiroAtual, capitalGiroIVASemSplit, capitalGiroSplit, diferencaCapitalGiro;
+            if (resultados.projecaoTemporal?.resultadosAnuais && 
+                resultados.projecaoTemporal.resultadosAnuais[anoSelecionado]) {
 
-        if (resultados.projecaoTemporal?.resultadosAnuais && 
-            resultados.projecaoTemporal.resultadosAnuais[anoSelecionado]) {
+                const resultadoAno = resultados.projecaoTemporal.resultadosAnuais[anoSelecionado];
+                capitalGiroAtual = resultadoAno.resultadoAtual?.capitalGiroDisponivel || 0;
+                capitalGiroSplit = resultadoAno.resultadoSplitPayment?.capitalGiroDisponivel || 0;
+                capitalGiroIVASemSplit = resultadoAno.resultadoIVASemSplit?.capitalGiroDisponivel || 0;
+                diferencaCapitalGiro = resultadoAno.diferencaCapitalGiro || 0;
+            } else {
+                // Fallback para impactoBase
+                capitalGiroAtual = resultados.impactoBase.resultadoAtual?.capitalGiroDisponivel || 0;
+                capitalGiroSplit = resultados.impactoBase.resultadoSplitPayment?.capitalGiroDisponivel || 0;
+                capitalGiroIVASemSplit = resultados.impactoBase.resultadoIVASemSplit?.capitalGiroDisponivel || 0;
+                diferencaCapitalGiro = resultados.impactoBase.diferencaCapitalGiro || 0;
+            }
 
-            const resultadoAno = resultados.projecaoTemporal.resultadosAnuais[anoSelecionado];
-            capitalGiroAtual = resultadoAno.resultadoAtual?.capitalGiroDisponivel || 0;
-            capitalGiroSplit = resultadoAno.resultadoSplitPayment?.capitalGiroDisponivel || 0;
-            capitalGiroIVASemSplit = resultadoAno.resultadoIVASemSplit?.capitalGiroDisponivel || 0;
-            diferencaCapitalGiro = resultadoAno.diferencaCapitalGiro || 0;
-        } else {
-            // Fallback para impactoBase
-            capitalGiroAtual = resultados.impactoBase.resultadoAtual?.capitalGiroDisponivel || 0;
-            capitalGiroSplit = resultados.impactoBase.resultadoSplitPayment?.capitalGiroDisponivel || 0;
-            capitalGiroIVASemSplit = resultados.impactoBase.resultadoIVASemSplit?.capitalGiroDisponivel || 0;
-            diferencaCapitalGiro = resultados.impactoBase.diferencaCapitalGiro || 0;
-        }
-
-        // Criar dados para o gráfico
-        const data = {
-            labels: ['Capital de Giro Disponível'],
-            datasets: [
-                {
-                    label: 'Regime Atual',
-                    data: [capitalGiroAtual],
-                    backgroundColor: 'rgba(54, 162, 235, 0.7)',
-                    borderColor: 'rgba(54, 162, 235, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: 'IVA sem Split Payment',
-                    data: [capitalGiroIVASemSplit],
-                    backgroundColor: 'rgba(255, 206, 86, 0.7)',
-                    borderColor: 'rgba(255, 206, 86, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: 'IVA com Split Payment',
-                    data: [capitalGiroSplit],
-                    backgroundColor: 'rgba(255, 99, 132, 0.7)',
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    borderWidth: 1
-                }
-            ]
-        };
-
-        // Configurar opções do gráfico
-        const options = {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `Impacto no Capital de Giro (${anoSelecionado})`,
-                    font: {
-                        size: 16
+            // Criar dados para o gráfico
+            const data = {
+                labels: ['Capital de Giro Disponível'],
+                datasets: [
+                    {
+                        label: 'Regime Atual',
+                        data: [capitalGiroAtual],
+                        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'IVA sem Split Payment',
+                        data: [capitalGiroIVASemSplit],
+                        backgroundColor: 'rgba(255, 206, 86, 0.7)',
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'IVA com Split Payment',
+                        data: [capitalGiroSplit],
+                        backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1
                     }
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += new Intl.NumberFormat('pt-BR', {
+                ]
+            };
+
+            // Configurar opções do gráfico
+            const options = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Impacto no Capital de Giro (${anoSelecionado})`,
+                        font: { size: 16 }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += new Intl.NumberFormat('pt-BR', {
+                                        style: 'currency',
+                                        currency: 'BRL'
+                                    }).format(context.parsed.y);
+                                }
+                                return label;
+                            },
+                            footer: function(tooltipItems) {
+                                return 'Diferença (Atual vs Split): ' + new Intl.NumberFormat('pt-BR', {
                                     style: 'currency',
                                     currency: 'BRL'
-                                }).format(context.parsed.y);
+                                }).format(diferencaCapitalGiro);
                             }
-                            return label;
-                        },
-                        footer: function(tooltipItems) {
-                            return 'Diferença (Atual vs Split): ' + new Intl.NumberFormat('pt-BR', {
-                                style: 'currency',
-                                currency: 'BRL'
-                            }).format(diferencaCapitalGiro);
                         }
+                    },
+                    legend: {
+                        position: 'bottom'
                     }
                 },
-                legend: {
-                    position: 'bottom'
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return new Intl.NumberFormat('pt-BR', {
-                                style: 'currency',
-                                currency: 'BRL',
-                                maximumFractionDigits: 0
-                            }).format(value);
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return new Intl.NumberFormat('pt-BR', {
+                                    style: 'currency',
+                                    currency: 'BRL',
+                                    maximumFractionDigits: 0
+                                }).format(value);
+                            }
                         }
                     }
                 }
-            }
-        };
+            };
 
-        // Criar o gráfico
-        _charts.capitalGiro = new Chart(canvas, {
-            type: 'bar',
-            data: data,
-            options: options
-        });
+            // Criar o gráfico
+            const novoGrafico = new Chart(canvas, {
+                type: 'bar',
+                data: data,
+                options: options
+            });
+
+            // Armazenar referência
+            _charts.capitalGiro = novoGrafico;
+
+            console.log('Gráfico de capital de giro criado com sucesso');
+
+        } catch (error) {
+            console.error('Erro ao criar gráfico de capital de giro:', error);
+        }
     }
     
     /**

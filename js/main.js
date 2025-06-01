@@ -1268,15 +1268,16 @@ function atualizarInterface(resultado) {
         // Atualizar tabela de transição com dados válidos
         atualizarTabelaTransicao(resultado);
 
-        // Renderizar gráficos de detalhamento após um pequeno delay
-        setTimeout(() => {
-            renderizarGraficosDetalhamento(resultado);
-        }, 500);
-        
-        // Renderizar gráficos de detalhamento após um pequeno delay
-        setTimeout(() => {
-            renderizarGraficosDetalhamento(resultado);
-        }, 500);
+        // Atualizar gráficos se o ChartManager estiver disponível
+        if (typeof window.ChartManager !== 'undefined' && typeof window.ChartManager.renderizarGraficos === 'function') {
+            // Aguardar um pouco para garantir que a interface foi atualizada
+            setTimeout(() => {
+                console.log('Iniciando renderização de gráficos...');
+                window.ChartManager.renderizarGraficos(resultado);
+            }, 200);
+        } else {
+            console.warn('ChartManager não encontrado ou função renderizarGraficos indisponível');
+        }
         
         const divResultadosDetalhados = document.getElementById('resultados-detalhados');
         if (divResultadosDetalhados) {

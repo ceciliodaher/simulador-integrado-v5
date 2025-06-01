@@ -2946,3 +2946,30 @@ button:active, .btn:active {
 .detail-table {
     display: table !important;
 }
+#cenario-personalizado {
+    transition: all 0.3s ease;
+    margin-top: 10px;
+}
+
+#cenario-personalizado.show {
+    display: block !important;
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        padding: 0;
+    }
+    to {
+        opacity: 1;
+        max-height: 100px;
+        padding: inherit;
+    }
+}
+
+#taxa-crescimento:focus {
+    border-color: #0056b3;
+    box-shadow: 0 0 0 2px rgba(0, 86, 179, 0.2);
+}

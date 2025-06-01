@@ -836,6 +836,19 @@ const EnhancedCharts = (function() {
     // ===== INICIALIZAÇÃO ===== //
     function init() {
         addCustomAnimations();
+
+        // Função para melhorar gráficos existentes adicionando controles
+        function enhanceExistingCharts() {
+            setTimeout(() => {
+                document.querySelectorAll('.chart-container canvas').forEach(canvas => {
+                    const chart = Chart.getChart(canvas);
+                    if (chart && !canvas.parentNode.querySelector('.chart-controls')) {
+                        addChartControls(canvas.parentNode, chart);
+                    }
+                });
+            }, 1000);
+        }
+
         enhanceExistingCharts();
 
         // Configurar Chart.js defaults
@@ -860,6 +873,7 @@ const EnhancedCharts = (function() {
         exportAllChartsAsPDF,
         addChartControls,
         destroyExistingChart,
+        enhanceExistingCharts,  // <- ADICIONAR ESTA LINHA
         chartColors
     };
 })();
@@ -879,24 +893,31 @@ EnhancedCharts.init();
 }, 100);
 }
 });
-// ===== INTEGRAÇÃO COM CHARTMANAGER EXISTENTE ===== //
-if (window.ChartManager) {
-// Estender ChartManager existente
-const originalRenderizarGraficos = window.ChartManager.renderizarGraficos;
-window.ChartManager.renderizarGraficos = function(dados) {
-    // Chamar função original
-    if (originalRenderizarGraficos) {
-        originalRenderizarGraficos.call(this, dados);
-    }
-    
-    // Aplicar melhorias
-    setTimeout(() => {
-        enhanceExistingCharts();
-    }, 500);
-};
 
-// Adicionar função de atualização de tema
-window.ChartManager.updateChartsTheme = EnhancedCharts.updateChartsTheme;
+// ===== INTEGRAÇÃO COM CHARTMANAGER EXISTENTE ===== //
+// ===== INTEGRAÇÃO COM CHARTMANAGER EXISTENTE ===== //
+// TEMPORARIAMENTE DESABILITADO PARA EVITAR CONFLITOS
+/*
+if (window.ChartManager) {
+    // Estender ChartManager existente
+    const originalRenderizarGraficos = window.ChartManager.renderizarGraficos;
+    window.ChartManager.renderizarGraficos = function(dados) {
+        // Chamar função original
+        if (originalRenderizarGraficos) {
+            originalRenderizarGraficos.call(this, dados);
+        }
+        
+        // Aplicar melhorias
+        setTimeout(() => {
+            if (window.EnhancedCharts && window.EnhancedCharts.enhanceExistingCharts) {
+                window.EnhancedCharts.enhanceExistingCharts();
+            }
+        }, 500);
+    };
+
+    // Adicionar função de atualização de tema
+    window.ChartManager.updateChartsTheme = EnhancedCharts.updateChartsTheme;
 }
+*/
 // ===== EXPORTAR PARA ESCOPO GLOBAL ===== //
 window.EnhancedCharts = EnhancedCharts;
