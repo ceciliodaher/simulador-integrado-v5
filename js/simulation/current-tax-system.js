@@ -397,12 +397,12 @@ window.CurrentTaxSystem = (function() {
      * @returns {Object} - Resultados detalhados do fluxo de caixa atual
      */
     function calcularFluxoCaixaAtual(dados) {
-        // Conversão única se necessário
+        // Garantir que dados estão em formato plano
         if (dados.empresa !== undefined) {
             dados = window.DataManager.converterParaEstruturaPlana(dados);
         }
 
-        // Validação única de campos críticos
+        // Validação de campos críticos
         const faturamento = Math.max(0, dados.faturamento || 0);
         const aliquota = Math.max(0, Math.min(1, dados.aliquota || 0.265));
         const pmr = Math.max(0, dados.pmr || 30);
@@ -410,17 +410,23 @@ window.CurrentTaxSystem = (function() {
         const percPrazo = Math.max(0, Math.min(1, dados.percPrazo || 0.7));
         const creditos = Math.max(0, dados.creditos || 0);
 
-        // Cálculos diretos
+        // Cálculos principais
         const valorImpostoTotal = faturamento * aliquota;
         const valorImpostoLiquido = Math.max(0, valorImpostoTotal - creditos);
         const prazoRecolhimento = 25;
         const capitalGiroImpostos = valorImpostoLiquido;
         const recebimentoVista = faturamento * percVista;
         const recebimentoPrazo = faturamento * percPrazo;
-        const tempoMedioCapitalGiro = window.CalculationCore.calcularTempoMedioCapitalGiro(pmr, prazoRecolhimento, percVista, percPrazo);
-        const beneficioDiasCapitalGiro = (capitalGiroImpostos / faturamento) * tempoMedioCapitalGiro;
 
-        // Cálculo único de impostos
+        // Tempo médio com função do CalculationCore
+        const tempoMedioCapitalGiro = window.CalculationCore.calcularTempoMedioCapitalGiro(
+            pmr, prazoRecolhimento, percVista, percPrazo
+        );
+
+        const beneficioDiasCapitalGiro = faturamento > 0 ? 
+            (capitalGiroImpostos / faturamento) * tempoMedioCapitalGiro : 0;
+
+        // Calcular impostos detalhados
         const impostos = calcularTodosImpostosAtuais({
             revenue: faturamento,
             serviceCompany: dados.tipoEmpresa === 'servicos',

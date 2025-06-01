@@ -326,123 +326,51 @@ function calcularTotaisEAliquotasEfetivas(faturamento) {
         console.warn('CREDITOS-TRIBUTARIOS: Faturamento inválido ou zero');
         return;
     }
-    
-    // ADICIONAR no início da função, logo após a validação do faturamento:
-
-    // CORREÇÃO: Preservar dados SPED na composição tributária detalhada
-    if (window.dadosImportadosSped?.parametrosFiscais?.composicaoTributaria) {
-        const composicao = window.dadosImportadosSped.parametrosFiscais.composicaoTributaria;
-
-        // Garantir que os dados SPED sejam preservados na interface
-        setTimeout(() => {
-            if (typeof atualizarComposicaoTributaria === 'function') {
-                const resultadoMock = {
-                    memoriaCalculo: {
-                        dadosEntrada: {
-                            empresa: { faturamento: faturamento },
-                            parametrosFiscais: { composicaoTributaria: composicao }
-                        }
-                    }
-                };
-                atualizarComposicaoTributaria(resultadoMock, new Date().getFullYear());
-            }
-        }, 100);
-    }
 
     const impostos = ['pis', 'cofins', 'icms', 'ipi', 'iss'];
     let totalDebitos = 0;
     let totalCreditos = 0;
 
-    // Objeto para armazenar valores para debug
-    const valoresProcessados = {
-        debitos: {},
-        creditos: {},
-        aliquotasEfetivas: {}
-    };
-
-    // Processar cada imposto individualmente
     impostos.forEach(imposto => {
-        // Obter valores de débito e crédito
+        // Usar função robusta para obter valores
         const debito = obterValorCampoRobusto(`debito-${imposto}`);
         const credito = obterValorCampoRobusto(`credito-${imposto}`);
 
-        // Armazenar para debug
-        valoresProcessados.debitos[imposto] = debito;
-        valoresProcessados.creditos[imposto] = credito;
-
-        // Somar aos totais
         totalDebitos += debito;
         totalCreditos += credito;
 
-        // Calcular débito líquido e alíquota efetiva
+        // Calcular alíquota efetiva correta
         const debitoLiquido = Math.max(0, debito - credito);
-        const aliquotaEfetiva = (debitoLiquido / faturamento) * 100;
-
-        // Armazenar para debug
-        valoresProcessados.aliquotasEfetivas[imposto] = aliquotaEfetiva;
+        const aliquotaEfetiva = faturamento > 0 ? (debitoLiquido / faturamento) * 100 : 0;
 
         // Atualizar campo de alíquota efetiva
         const campoAliquota = document.getElementById(`aliquota-efetiva-${imposto}`);
         if (campoAliquota) {
-            const valorFormatado = aliquotaEfetiva.toFixed(3);
-            campoAliquota.value = valorFormatado;
-            
-            // Armazenar valor numérico
+            campoAliquota.value = aliquotaEfetiva.toFixed(3);
             if (campoAliquota.dataset) {
                 campoAliquota.dataset.rawValue = aliquotaEfetiva.toString();
             }
-
-            // Disparar eventos para garantir atualização da interface
             campoAliquota.dispatchEvent(new Event('change', { bubbles: true }));
-            campoAliquota.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            console.log(`CREDITOS-TRIBUTARIOS: Alíquota efetiva ${imposto}: ${valorFormatado}% (débito: ${debito}, crédito: ${credito}, líquido: ${debitoLiquido})`);
         }
     });
 
-    // Log consolidado para verificação
-    console.log('CREDITOS-TRIBUTARIOS: Valores processados:', valoresProcessados);
+    // Atualizar totais com formatação correta
+    preencherCampoValor('total-debitos', totalDebitos, true);
+    preencherCampoValor('total-creditos', totalCreditos, true);
 
-    // Atualizar campos de totais
-    const campoTotalDebitos = document.getElementById('total-debitos');
-    if (campoTotalDebitos) {
-        const valorFormatadoDebitos = formatarComoMoeda(totalDebitos);
-        campoTotalDebitos.value = valorFormatadoDebitos;
-        if (campoTotalDebitos.dataset) {
-            campoTotalDebitos.dataset.rawValue = totalDebitos.toString();
-        }
-        campoTotalDebitos.dispatchEvent(new Event('change', { bubbles: true }));
-        console.log(`CREDITOS-TRIBUTARIOS: Total débitos: ${valorFormatadoDebitos} (${totalDebitos})`);
-    }
-
-    const campoTotalCreditos = document.getElementById('total-creditos');
-    if (campoTotalCreditos) {
-        const valorFormatadoCreditos = formatarComoMoeda(totalCreditos);
-        campoTotalCreditos.value = valorFormatadoCreditos;
-        if (campoTotalCreditos.dataset) {
-            campoTotalCreditos.dataset.rawValue = totalCreditos.toString();
-        }
-        campoTotalCreditos.dispatchEvent(new Event('change', { bubbles: true }));
-        console.log(`CREDITOS-TRIBUTARIOS: Total créditos: ${valorFormatadoCreditos} (${totalCreditos})`);
-    }
-
-    // Calcular e atualizar alíquota efetiva total
+    // Calcular alíquota efetiva total
     const debitoLiquidoTotal = Math.max(0, totalDebitos - totalCreditos);
-    const aliquotaEfetivaTotal = (debitoLiquidoTotal / faturamento) * 100;
+    const aliquotaEfetivaTotal = faturamento > 0 ? (debitoLiquidoTotal / faturamento) * 100 : 0;
 
     const campoAliquotaTotal = document.getElementById('aliquota-efetiva-total');
     if (campoAliquotaTotal) {
-        const valorFormatadoTotal = aliquotaEfetivaTotal.toFixed(3);
-        campoAliquotaTotal.value = valorFormatadoTotal;
+        campoAliquotaTotal.value = aliquotaEfetivaTotal.toFixed(3);
         if (campoAliquotaTotal.dataset) {
             campoAliquotaTotal.dataset.rawValue = aliquotaEfetivaTotal.toString();
         }
-        campoAliquotaTotal.dispatchEvent(new Event('change', { bubbles: true }));
-        campoAliquotaTotal.dispatchEvent(new Event('input', { bubbles: true }));
-        console.log(`CREDITOS-TRIBUTARIOS: Alíquota efetiva total: ${valorFormatadoTotal}% (débito líquido total: ${debitoLiquidoTotal})`);
     }
 
-    console.log(`CREDITOS-TRIBUTARIOS: Cálculo de totais concluído - Débitos: ${totalDebitos}, Créditos: ${totalCreditos}, Alíquota Total: ${aliquotaEfetivaTotal.toFixed(3)}%`);
+    console.log(`CREDITOS-TRIBUTARIOS: Totais calculados - Débitos: ${totalDebitos}, Créditos: ${totalCreditos}`);
 }
 
 /**
@@ -573,6 +501,32 @@ function obterValorCampo(campoId) {
     const valorLimpo = valorTexto.replace(/[^\d,.-]/g, '').replace(',', '.');
     const valor = parseFloat(valorLimpo);
     
+    return isNaN(valor) ? 0 : valor;
+}
+
+function obterValorCampoRobusto(campoId) {
+    const elemento = document.getElementById(campoId);
+    if (!elemento) return 0;
+    
+    // Priorizar dataset.rawValue
+    if (elemento.dataset?.rawValue !== undefined) {
+        const valor = parseFloat(elemento.dataset.rawValue);
+        return isNaN(valor) ? 0 : valor;
+    }
+    
+    // Processar valor formatado
+    const valorTexto = elemento.value;
+    if (!valorTexto) return 0;
+    
+    // Se contém R$, é valor monetário
+    if (valorTexto.includes('R$')) {
+        const valorLimpo = valorTexto.replace(/[^\d,]/g, '').replace(',', '.');
+        const valor = parseFloat(valorLimpo);
+        return isNaN(valor) ? 0 : valor;
+    }
+    
+    // Valor simples
+    const valor = parseFloat(valorTexto);
     return isNaN(valor) ? 0 : valor;
 }
 

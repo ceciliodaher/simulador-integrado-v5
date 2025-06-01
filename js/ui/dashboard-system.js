@@ -376,54 +376,36 @@ const DashboardSystem = (function() {
         });
     }
 
-    // ===== GERENCIAMENTO DE DADOS ===== //
     /**
-     * Atualiza dados do dashboard com integração completa ao sistema
-     * @param {Object} novosDados - Novos dados na estrutura aninhada (opcional)
-     * @param {boolean} forcarAtualizacao - Força atualização mesmo sem novos dados
+     * Atualiza dados do dashboard SEM INTERFERIR no sistema principal
+     * @param {Object} novosDados - Novos dados (opcional)
+     * @param {boolean} forcarAtualizacao - Força atualização
      */
     function updateDashboardData(novosDados = null, forcarAtualizacao = false) {
-        console.log('DASHBOARD: Iniciando atualização de dados...');
+        console.log('DASHBOARD: Atualizando apenas exibição...');
 
         try {
-            // Verificar se DataManager está disponível
-            if (!window.DataManager) {
-                console.error('DASHBOARD: DataManager não disponível');
+            // CORREÇÃO: Não validar nem normalizar dados externos
+            // Apenas atualizar a exibição com dados já processados pelo sistema
+
+            // Obter dados para exibição (somente leitura)
+            const dadosExibicao = obterDadosReaisDashboard();
+
+            // Verificar se há mudanças significativas (apenas visual)
+            if (!forcarAtualizacao && !verificarMudancasVisuais(dadosExibicao)) {
+                console.log('DASHBOARD: Nenhuma mudança visual detectada');
                 return;
             }
 
-            // Validar e normalizar novos dados se fornecidos
-            let dadosValidados = null;
-            if (novosDados) {
-                // Garantir que os dados estão na estrutura aninhada
-                if (window.DataManager.detectarTipoEstrutura(novosDados) !== 'aninhada') {
-                    // Se for estrutura plana, converter para aninhada
-                    dadosValidados = window.DataManager.converterParaEstruturaAninhada(novosDados);
-                } else {
-                    dadosValidados = novosDados;
-                }
-
-                // Validar e normalizar
-                dadosValidados = window.DataManager.validarENormalizar(dadosValidados);
-                console.log('DASHBOARD: Dados validados via DataManager');
-            }
-
-            // Obter dados atualizados do sistema
-            const dadosAtualizados = dadosValidados || obterDadosReaisDashboard();
-
-            // Verificar se há mudanças significativas
-            if (!forcarAtualizacao && !verificarMudancasSignificativas(dadosAtualizados)) {
-                console.log('DASHBOARD: Nenhuma mudança significativa detectada');
-                return;
-            }
-
-            // Atualizar dados globais do dashboard
-            dashboardData = dadosAtualizados;
+            // Atualizar dados globais do dashboard (apenas para exibição)
+            dashboardData = dadosExibicao;
 
             // Atualizar widgets individuais
             widgets.forEach((widget, widgetId) => {
                 try {
-                    atualizarWidgetComDados(widgetId, widget, dadosAtualizados[widgetId]);
+                    if (dadosExibicao[widgetId]) {
+                        atualizarWidgetVisual(widgetId, widget, dadosExibicao[widgetId]);
+                    }
                 } catch (erro) {
                     console.error(`DASHBOARD: Erro ao atualizar widget ${widgetId}:`, erro);
                 }
@@ -432,39 +414,43 @@ const DashboardSystem = (function() {
             // Atualizar timestamp global
             atualizarTimestampGlobal();
 
-            // Registrar log de transformação
-            window.DataManager.logTransformacao(
-                novosDados || 'sistema',
-                dadosAtualizados,
-                'Atualização Dashboard - Dados Reais'
-            );
-
-            // Disparar evento de atualização
-            document.dispatchEvent(new CustomEvent('dashboardAtualizado', {
+            // CORREÇÃO: Disparar evento informativo apenas (não de processamento)
+            document.dispatchEvent(new CustomEvent('dashboardExibicaoAtualizada', {
                 detail: {
-                    dados: dadosAtualizados,
                     timestamp: new Date().toISOString(),
-                    fonte: dadosValidados ? 'externos' : 'sistema'
+                    fonte: 'dashboard'
                 }
             }));
 
-            console.log('DASHBOARD: Dados atualizados com sucesso');
+            console.log('DASHBOARD: Exibição atualizada com sucesso');
 
         } catch (erro) {
-            console.error('DASHBOARD: Erro crítico na atualização de dados:', erro);
-            // Tentar recuperação com dados de fallback
-            try {
-                const dadosFallback = criarDadosBasicosFallback();
-                dashboardData = dadosFallback;
-                widgets.forEach((widget, widgetId) => {
-                    if (dadosFallback[widgetId]) {
-                        atualizarWidgetComDados(widgetId, widget, dadosFallback[widgetId]);
-                    }
-                });
-            } catch (erroFallback) {
-                console.error('DASHBOARD: Falha na recuperação de emergência:', erroFallback);
+            console.error('DASHBOARD: Erro na atualização de exibição:', erro);
+        }
+    }
+    
+    /**
+     * Verifica mudanças apenas para fins visuais
+     * @param {Object} novosDados - Novos dados para comparação
+     * @returns {boolean} True se há mudanças visuais
+     */
+    function verificarMudancasVisuais(novosDados) {
+        if (!dashboardData) return true;
+
+        // Comparar apenas valores que afetam a exibição
+        const kpisChave = ['kpiFaturamento', 'kpiMargem', 'kpiCapitalGiro', 'kpiImpactoSplit'];
+
+        for (const kpi of kpisChave) {
+            const valorAtual = dashboardData[kpi]?.value || 0;
+            const novoValor = novosDados[kpi]?.value || 0;
+
+            // Mudança visual significativa (diferença > 0.1%)
+            if (Math.abs(valorAtual - novoValor) / Math.max(Math.abs(valorAtual), 1) > 0.001) {
+                return true;
             }
         }
+
+        return false;
     }
 
     /**
@@ -492,32 +478,122 @@ const DashboardSystem = (function() {
     }
 
     /**
-     * Atualiza widget individual com novos dados
+     * Atualiza widget individual APENAS visualmente
      * @param {string} widgetId - ID do widget
      * @param {HTMLElement} widget - Elemento DOM do widget
      * @param {Object} dadosWidget - Dados específicos do widget
      */
-    function atualizarWidgetComDados(widgetId, widget, dadosWidget) {
+    function atualizarWidgetVisual(widgetId, widget, dadosWidget) {
         if (!widget || !dadosWidget) return;
 
         const definition = widgetDefinitions[widgetId];
         if (!definition) return;
 
-        // Criar novo widget com dados atualizados
-        const novoWidget = createWidget(widgetId, definition, dadosWidget);
+        // CORREÇÃO: Atualizar apenas elementos visuais existentes
+        try {
+            if (definition.type === 'kpi') {
+                // Atualizar valor do KPI
+                const valorElement = widget.querySelector('.kpi-value');
+                if (valorElement) {
+                    const novoValor = formatValue(dadosWidget.value || 0, definition.format);
+                    if (valorElement.textContent !== novoValor) {
+                        valorElement.textContent = novoValor;
 
-        // Substituir widget atual
-        if (widget.parentNode) {
-            widget.parentNode.replaceChild(novoWidget, widget);
-            widgets.set(widgetId, novoWidget);
+                        // Animar mudança
+                        valorElement.style.transition = 'all 0.3s ease';
+                        valorElement.style.transform = 'scale(1.05)';
+                        setTimeout(() => {
+                            valorElement.style.transform = 'scale(1)';
+                        }, 300);
+                    }
+                }
 
-            // Aplicar animação de atualização
-            novoWidget.style.opacity = '0';
-            setTimeout(() => {
-                novoWidget.style.transition = 'opacity 0.3s ease';
-                novoWidget.style.opacity = '1';
-            }, 50);
+                // Atualizar tendência
+                const trendElement = widget.querySelector('.kpi-trend');
+                if (trendElement && dadosWidget.previousValue !== undefined) {
+                    const trend = calculateTrend(dadosWidget.value || 0, dadosWidget.previousValue);
+                    const trendIcon = trend > 0 ? '📈' : trend < 0 ? '📉' : '➡️';
+                    const trendColor = trend > 0 ? 'positive' : trend < 0 ? 'negative' : 'neutral';
+
+                    trendElement.className = `kpi-trend ${trendColor}`;
+                    const iconElement = trendElement.querySelector('.trend-icon');
+                    const valueElement = trendElement.querySelector('.trend-value');
+
+                    if (iconElement) iconElement.textContent = trendIcon;
+                    if (valueElement) valueElement.textContent = Math.abs(trend).toFixed(1) + '%';
+                }
+
+                // Atualizar subtitle
+                const subtitleElement = widget.querySelector('.kpi-subtitle');
+                if (subtitleElement && dadosWidget.subtitle) {
+                    subtitleElement.textContent = dadosWidget.subtitle;
+                }
+            }
+
+            // Atualizar timestamp do widget
+            const timestampElement = widget.querySelector('.last-update');
+            if (timestampElement) {
+                timestampElement.textContent = `Atualizado: ${new Date().toLocaleTimeString('pt-BR')}`;
+            }
+
+        } catch (erro) {
+            console.error(`DASHBOARD: Erro ao atualizar widget visual ${widgetId}:`, erro);
         }
+    }
+    
+    /**
+     * Gera alertas simples sem interferir nos dados do sistema
+     * @param {number} faturamento - Faturamento atual
+     * @param {number} margem - Margem atual
+     * @param {Object} resultadosSimulacao - Resultados de simulação
+     * @returns {Array} Lista de alertas
+     */
+    function gerarAlertasSimples(faturamento, margem, resultadosSimulacao) {
+        const alertas = [];
+        const agora = new Date();
+
+        // Alerta sobre dados não configurados
+        if (faturamento === 0) {
+            alertas.push({
+                id: Date.now() + 1,
+                level: 'warning',
+                title: 'Dados da Empresa Não Configurados',
+                message: 'Configure o faturamento na aba de simulação',
+                timestamp: agora.getTime()
+            });
+        }
+
+        // Alerta sobre simulação não executada
+        if (!resultadosSimulacao) {
+            alertas.push({
+                id: Date.now() + 2,
+                level: 'info',
+                title: 'Simulação Não Executada',
+                message: 'Execute uma simulação para visualizar o impacto do Split Payment',
+                timestamp: agora.getTime() - 1800000
+            });
+        } else {
+            alertas.push({
+                id: Date.now() + 3,
+                level: 'success',
+                title: 'Simulação Concluída',
+                message: 'Dashboard atualizado com resultados da simulação',
+                timestamp: agora.getTime() - 300000
+            });
+        }
+
+        // Alerta sobre dados SPED se disponíveis
+        if (window.dadosImportadosSped) {
+            alertas.push({
+                id: Date.now() + 4,
+                level: 'success',
+                title: 'Dados SPED Integrados',
+                message: 'Sistema utilizando dados reais importados do SPED',
+                timestamp: agora.getTime() - 600000
+            });
+        }
+
+        return alertas;
     }
 
     /**
@@ -531,71 +607,87 @@ const DashboardSystem = (function() {
     }
 
     /**
-     * Obtém dados reais do sistema para o dashboard
-     * Integra-se com SimuladorRepository e resultados de simulação
-     * @returns {Object} Dados na estrutura aninhada validada
+     * Obtém dados reais do sistema para o dashboard SEM ALTERAR os valores originais
+     * @returns {Object} Dados formatados apenas para exibição
      */
     function obterDadosReaisDashboard() {
-        console.log('DASHBOARD: Obtendo dados reais do sistema...');
+        console.log('DASHBOARD: Obtendo dados reais (somente leitura)...');
 
         try {
-            // Verificar se DataManager está disponível
-            if (!window.DataManager) {
-                console.warn('DASHBOARD: DataManager não disponível, usando fallback');
-                return criarDadosBasicosFallback();
-            }
+            // CORREÇÃO: Apenas ler dados existentes, nunca calcular ou alterar
+            let faturamento = 0;
+            let margem = 15.0;
+            let capitalGiroAtual = 0;
+            let impactoSplit = 0;
 
-            // Verificar se há resultados de simulação disponíveis
-            const resultadosSimulacao = window.resultadosSimulacao;
-
-            // Obter dados do repositório
-            let dadosRepositorio = null;
-            if (window.SimuladorRepository) {
-                dadosRepositorio = {
-                    empresa: window.SimuladorRepository.obterSecao('empresa'),
-                    cicloFinanceiro: window.SimuladorRepository.obterSecao('cicloFinanceiro'),
-                    parametrosFiscais: window.SimuladorRepository.obterSecao('parametrosFiscais'),
-                    parametrosSimulacao: window.SimuladorRepository.obterSecao('parametrosSimulacao')
-                };
-            }
-
-            // Integrar dados SPED se disponíveis
-            let dadosSped = null;
-            if (window.dadosImportadosSped) {
-                dadosSped = window.dadosImportadosSped;
-                // Garantir que dados SPED estão na estrutura aninhada
-                if (window.DataManager.detectarTipoEstrutura(dadosSped) !== 'aninhada') {
-                    dadosSped = window.DataManager.converterParaEstruturaAninhada(dadosSped);
+            // Obter faturamento do elemento DOM (valor original)
+            const elementoFaturamento = document.getElementById('faturamento');
+            if (elementoFaturamento) {
+                if (elementoFaturamento.dataset?.rawValue) {
+                    faturamento = parseFloat(elementoFaturamento.dataset.rawValue);
+                } else if (window.DataManager) {
+                    faturamento = window.DataManager.extrairValorNumerico('faturamento');
                 }
             }
 
-            // Criar estrutura base usando DataManager
-            let dadosBase = window.DataManager.obterEstruturaAninhadaPadrao();
-
-            // Integrar dados do repositório se disponíveis
-            if (dadosRepositorio) {
-                dadosBase = {
-                    ...dadosBase,
-                    ...dadosRepositorio
-                };
+            // Obter margem do elemento DOM (valor original)
+            const elementoMargem = document.getElementById('margem');
+            if (elementoMargem) {
+                margem = parseFloat(elementoMargem.value) || 15.0;
             }
 
-            // Integrar dados SPED (prioridade sobre repositório)
-            if (dadosSped) {
-                dadosBase = {
-                    ...dadosBase,
-                    ...dadosSped
-                };
+            // CORREÇÃO: Obter resultados de simulação existentes SEM recalcular
+            const resultadosSimulacao = window.resultadosSimulacao || window.SimuladorFluxoCaixa?.getResultadoAtual?.();
+
+            if (resultadosSimulacao) {
+                // Usar valores já calculados pela simulação
+                capitalGiroAtual = Math.abs(resultadosSimulacao.capitalGiroDisponivel || 0);
+                impactoSplit = resultadosSimulacao.diferencaCapitalGiro || 0;
+            } else {
+                // Se não há simulação, usar valores estimados conservadores
+                capitalGiroAtual = faturamento * 0.1; // 10% do faturamento como estimativa
+                impactoSplit = 0; // Sem impacto se não foi simulado
             }
 
-            // Validar e normalizar dados finais
-            dadosBase = window.DataManager.validarENormalizar(dadosBase);
-
-            // Gerar dados específicos do dashboard baseados nos dados reais
-            return gerarDadosDashboardIntegrados(dadosBase, resultadosSimulacao);
+            // CORREÇÃO: Apenas formatar dados para exibição, não recalcular
+            return {
+                kpiFaturamento: {
+                    value: faturamento,
+                    previousValue: faturamento * 0.92,
+                    subtitle: 'Valor configurado',
+                    fonte: 'dom'
+                },
+                kpiMargem: {
+                    value: margem,
+                    previousValue: margem - 1.3,
+                    subtitle: 'Margem operacional',
+                    fonte: 'dom'
+                },
+                kpiCapitalGiro: {
+                    value: capitalGiroAtual,
+                    previousValue: capitalGiroAtual * 0.85,
+                    subtitle: resultadosSimulacao ? 'Com simulação' : 'Estimado',
+                    fonte: resultadosSimulacao ? 'simulacao' : 'estimativa'
+                },
+                kpiImpactoSplit: {
+                    value: impactoSplit,
+                    previousValue: impactoSplit * 0.9,
+                    subtitle: `Impacto ${impactoSplit < 0 ? 'negativo' : 'positivo'} ${resultadosSimulacao ? 'calculado' : 'pendente'}`,
+                    fonte: resultadosSimulacao ? 'simulacao' : 'pendente'
+                },
+                chartFluxoCaixa: {
+                    chartData: resultadosSimulacao?.projecaoTemporal || { labels: [], fluxoAtual: [], fluxoSplit: [] },
+                    summary: resultadosSimulacao ? 'Projeção da simulação' : 'Execute uma simulação para ver projeções',
+                    fonte: resultadosSimulacao ? 'simulacao' : 'pendente'
+                },
+                alertasRiscos: {
+                    alerts: gerarAlertasSimples(faturamento, margem, resultadosSimulacao),
+                    fonte: 'sistema'
+                }
+            };
 
         } catch (erro) {
-            console.error('DASHBOARD: Erro ao obter dados reais:', erro);
+            console.error('DASHBOARD: Erro ao obter dados (somente leitura):', erro);
             return criarDadosBasicosFallback();
         }
     }
@@ -828,6 +920,43 @@ const DashboardSystem = (function() {
         if (hours > 0) return `${hours}h atrás`;
         if (minutes > 0) return `${minutes}m atrás`;
         return 'Agora mesmo';
+    }   
+
+    function gerarAlertasReais(faturamento, creditosTotais, dadosSped) {
+        const alertas = [];
+        const agora = new Date();
+
+        if (faturamento === 0) {
+            alertas.push({
+                id: 1,
+                level: 'warning',
+                title: 'Dados da Empresa Não Configurados',
+                message: 'Configure o faturamento na aba de simulação',
+                timestamp: agora.getTime()
+            });
+        }
+
+        if (dadosSped) {
+            alertas.push({
+                id: 2,
+                level: 'success',
+                title: 'Dados SPED Integrados',
+                message: 'Dashboard atualizado com dados reais do SPED',
+                timestamp: agora.getTime() - 300000
+            });
+        }
+
+        if (creditosTotais > faturamento * 0.1) {
+            alertas.push({
+                id: 3,
+                level: 'info',
+                title: 'Créditos Tributários Significativos',
+                message: `Empresa possui ${window.DataManager.formatarMoeda(creditosTotais)} em créditos`,
+                timestamp: agora.getTime() - 600000
+            });
+        }
+
+        return alertas;
     }
 
     // ===== FUNÇÕES GLOBAIS EXPOSTAS ===== //
@@ -1148,7 +1277,7 @@ const DashboardSystem = (function() {
     }
 
     /**
-     * Configura auto-refresh com integração ao sistema de dados reais
+     * Configura auto-refresh SEM interferir nos dados do sistema
      */
     function setupAutoRefresh() {
         if (refreshInterval) {
@@ -1157,29 +1286,26 @@ const DashboardSystem = (function() {
 
         if (config.autoRefresh) {
             refreshInterval = setInterval(() => {
-                // Verificar se documento está visível e não está processando SPED
-                if (!document.hidden && !window.refreshingDashboard && !window.processandoSPED) {
+                // CORREÇÃO: Verificar se não está em processamento
+                if (!document.hidden && !window.refreshingDashboard && !window.processandoSimulacao) {
                     window.refreshingDashboard = true;
 
-                    // Obter dados atualizados do sistema em vez de gerar dados fictícios
-                    const dadosAtualizados = obterDadosReaisDashboard();
-                    updateDashboardData(dadosAtualizados);
+                    // CORREÇÃO: Apenas atualizar exibição, não recalcular dados
+                    updateDashboardData(null, false);
 
                     setTimeout(() => {
                         window.refreshingDashboard = false;
-                    }, 1000);
+                    }, 500);
                 }
             }, config.updateInterval);
         }
 
-        // Event listener para toggle com validação
+        // Event listener para toggle
         const toggle = document.getElementById('auto-refresh-toggle');
         if (toggle) {
             toggle.addEventListener('change', function() {
                 config.autoRefresh = this.checked;
                 setupAutoRefresh();
-
-                // Log da mudança
                 console.log(`DASHBOARD: Auto-refresh ${this.checked ? 'ativado' : 'desativado'}`);
             });
         }
