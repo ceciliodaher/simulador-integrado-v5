@@ -979,26 +979,29 @@ window.DataManager = (function() {
             return 0;
         }
 
-        // PRIORIZAR dataset.rawValue (do CurrencyFormatter)
+        // 1. PRIORIZAR: Primeiro verificar se temos dataset.rawValue (do CurrencyFormatter)
         if (elemento.dataset && elemento.dataset.rawValue !== undefined) {
             const valor = parseFloat(elemento.dataset.rawValue);
+            // Importante: Log para debug
+            console.log(`Extraindo valor de ${id} do dataset.rawValue: ${valor}`);
             return isNaN(valor) ? 0 : valor;
         }
 
-        // Para campos formatados como moeda
+        // 2. CORRIGIR: Para campos formatados como moeda, extrair corretamente
         if (elemento.value && (elemento.classList.contains('money-input') || 
             elemento.dataset.currencyInitialized === 'true' || 
             elemento.value.includes('R$'))) {
 
-            // Remover formatação e converter centavos para reais
-            const valorLimpo = elemento.value.replace(/[^\d]/g, '');
-            const valorEmCentavos = parseInt(valorLimpo) || 0;
-            const valorEmReais = valorEmCentavos / 100;
+            // Remover todos caracteres não numéricos exceto vírgula/ponto
+            const valorLimpo = elemento.value.replace(/[^\d,.-]/g, '').replace(',', '.');
+            const valorNumerico = parseFloat(valorLimpo);
 
-            return valorEmReais;
+            // Importante: Log para debug
+            console.log(`Extraindo valor monetário de ${id}: ${valorNumerico} (original: ${elemento.value})`);
+            return isNaN(valorNumerico) ? 0 : valorNumerico;
         }
 
-        // Processamento padrão
+        // 3. MANTER: Processamento padrão para outros tipos de campos
         const valorOriginal = elemento.value;
         if (valorOriginal === '') return 0;
 

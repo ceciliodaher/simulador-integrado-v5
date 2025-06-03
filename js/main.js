@@ -1258,6 +1258,15 @@ function atualizarInterface(resultado) {
         
         // Atualizar evolução tributária detalhada
         atualizarEvolucaoTributaria(resultado, anoSelecionado);
+        
+        // Renderizar gráficos de detalhamento por imposto
+        if (typeof renderizarGraficosDetalhamento === 'function') {
+            setTimeout(() => {
+                renderizarGraficosDetalhamento(resultado);
+            }, 300);
+        } else {
+            console.warn('Função renderizarGraficosDetalhamento não encontrada');
+        }
 
         // Forçar exibição das seções de transição
         document.getElementById('transicao-tributaria')?.style.setProperty('display', 'block');
@@ -1268,15 +1277,32 @@ function atualizarInterface(resultado) {
         // Atualizar tabela de transição com dados válidos
         atualizarTabelaTransicao(resultado);
 
+        // Garantir que os elementos HTML dos gráficos existam antes de renderizar
+        garantirElementosGraficos();
+
         // Atualizar gráficos se o ChartManager estiver disponível
         if (typeof window.ChartManager !== 'undefined' && typeof window.ChartManager.renderizarGraficos === 'function') {
-            // Aguardar um pouco para garantir que a interface foi atualizada
+            // Aguardar mais tempo para garantir que a interface foi completamente atualizada
             setTimeout(() => {
                 console.log('Iniciando renderização de gráficos...');
-                window.ChartManager.renderizarGraficos(resultado);
-            }, 200);
+
+                // Verificar se os dados estão estruturados corretamente
+                const dadosGraficos = prepararDadosParaGraficos(resultado);
+
+                window.ChartManager.renderizarGraficos(dadosGraficos);
+            }, 500); // Aumentado de 200ms para 500ms
         } else {
             console.warn('ChartManager não encontrado ou função renderizarGraficos indisponível');
+            // Tentar carregar o ChartManager
+            if (typeof window.ChartManager === 'undefined') {
+                console.log('Tentando inicializar ChartManager...');
+                setTimeout(() => {
+                    if (typeof window.ChartManager !== 'undefined') {
+                        const dadosGraficos = prepararDadosParaGraficos(resultado);
+                        window.ChartManager.renderizarGraficos(dadosGraficos);
+                    }
+                }, 1000);
+            }
         }
         
         const divResultadosDetalhados = document.getElementById('resultados-detalhados');
@@ -1301,7 +1327,128 @@ function atualizarInterface(resultado) {
     }
 }
 
+/**
+ * Garante que os elementos HTML necessários para os gráficos existam
+ */
+function garantirElementosGraficos() {
+    const graficosNecessarios = [
+        { id: 'grafico-fluxo-caixa', container: '#fluxo-caixa-container', titulo: 'Fluxo de Caixa Projetado' },
+        { id: 'grafico-projecao', container: '#comparacao-container', titulo: 'Comparação Tributária' },
+        { id: 'grafico-capital-giro', container: '#capital-giro-container', titulo: 'Capital de Giro' },
+        { id: 'grafico-decomposicao', container: '#decomposicao-container', titulo: 'Decomposição do Impacto' },
+        { id: 'grafico-sensibilidade', container: '#sensibilidade-container', titulo: 'Análise de Sensibilidade' }
+    ];
+
+    graficosNecessarios.forEach(grafico => {
+        let canvas = document.getElementById(grafico.id);
+        
+        if (!canvas) {
+            console.log(`Criando elemento canvas para ${grafico.titulo}`);
+            
+            // Tentar encontrar o container específico
+            let container = document.querySelector(grafico.container);
+            
+            // Se não encontrar, procurar containers alternativos
+            if (!container) {
+                container = document.querySelector('.chart-container') ||
+                           document.querySelector('#resultados-detalhados') ||
+                           document.querySelector('#resultados') ||
+                           document.body;
+            }
+
+            // Criar estrutura completa para o gráfico
+            const graficoWrapper = document.createElement('div');
+            graficoWrapper.className = 'grafico-wrapper mb-4';
+            graficoWrapper.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title">${grafico.titulo}</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" style="position: relative; height: 400px;">
+                            <canvas id="${grafico.id}"></canvas>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(graficoWrapper);
+            console.log(`Canvas ${grafico.id} criado com sucesso`);
+        }
+    });
+}
+
+/**
+ * Prepara os dados no formato correto para os gráficos
+ */
+function prepararDadosParaGraficos(resultado) {
+    // Garantir que a estrutura de dados esteja completa
+    const dadosGraficos = {
+        ...resultado,
+        // Garantir que dadosUtilizados existam
+        dadosUtilizados: resultado.dadosUtilizados || {
+            empresa: {
+                faturamento: resultado.memoriaCalculo?.dadosEntrada?.empresa?.faturamento || 1000000,
+                margem: resultado.memoriaCalculo?.dadosEntrada?.empresa?.margem || 0.15
+            },
+            parametrosFiscais: {
+                aliquota: resultado.memoriaCalculo?.dadosEntrada?.parametrosFiscais?.aliquota || 0.265
+            },
+            cicloFinanceiro: {
+                pmr: resultado.memoriaCalculo?.dadosEntrada?.cicloFinanceiro?.pmr || 30,
+                pmp: resultado.memoriaCalculo?.dadosEntrada?.cicloFinanceiro?.pmp || 30,
+                pme: resultado.memoriaCalculo?.dadosEntrada?.cicloFinanceiro?.pme || 30,
+                percVista: resultado.memoriaCalculo?.dadosEntrada?.cicloFinanceiro?.percVista || 0.3,
+                percPrazo: resultado.memoriaCalculo?.dadosEntrada?.cicloFinanceiro?.percPrazo || 0.7
+            }
+        }
+    };
+
+    // Garantir que o impactoBase tenha a estrutura necessária
+    if (!dadosGraficos.impactoBase) {
+        dadosGraficos.impactoBase = {
+            resultadoAtual: {
+                capitalGiroDisponivel: dadosGraficos.dadosUtilizados.empresa.faturamento * 0.8,
+                impostos: { total: dadosGraficos.dadosUtilizados.empresa.faturamento * 0.2 }
+            },
+            resultadoSplitPayment: {
+                capitalGiroDisponivel: dadosGraficos.dadosUtilizados.empresa.faturamento * 0.75,
+                impostos: { total: dadosGraficos.dadosUtilizados.empresa.faturamento * 0.18 }
+            },
+            resultadoIVASemSplit: {
+                capitalGiroDisponivel: dadosGraficos.dadosUtilizados.empresa.faturamento * 0.82,
+                impostos: { total: dadosGraficos.dadosUtilizados.empresa.faturamento * 0.18 }
+            },
+            diferencaCapitalGiro: dadosGraficos.dadosUtilizados.empresa.faturamento * -0.05
+        };
+    }
+
+    // Garantir que projecaoTemporal tenha dados básicos
+    if (!dadosGraficos.projecaoTemporal) {
+        dadosGraficos.projecaoTemporal = {
+            parametros: {
+                anoInicial: 2026,
+                anoFinal: 2033
+            },
+            resultadosAnuais: {},
+            comparacaoRegimes: {
+                anos: [2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033],
+                atual: { capitalGiro: [], impostos: [] },
+                splitPayment: { capitalGiro: [], impostos: [] },
+                ivaSemSplit: { capitalGiro: [], impostos: [] }
+            }
+        };
+    }
+
+    console.log('Dados preparados para gráficos:', dadosGraficos);
+    return dadosGraficos;
+}
+
 // ADICIONAR esta nova função:
+/**
+ * Renderiza gráficos de detalhamento por imposto durante a transição
+ * VERSÃO CORRIGIDA
+ */
 function renderizarGraficosDetalhamento(resultado) {
     console.log('Renderizando gráficos de detalhamento...');
     
@@ -1311,217 +1458,277 @@ function renderizarGraficosDetalhamento(resultado) {
         return;
     }
     
+    // Verificar se há dados necessários
+    if (!resultado || !resultado.memoriaCalculo?.dadosEntrada?.empresa?.faturamento) {
+        console.warn('Dados insuficientes para renderizar gráficos de detalhamento');
+        return;
+    }
+    
     const cronograma = {
         2026: 0.10, 2027: 0.25, 2028: 0.40, 2029: 0.55,
         2030: 0.70, 2031: 0.85, 2032: 0.95, 2033: 1.00
     };
     
     const anos = Object.keys(cronograma);
-    const faturamento = resultado.memoriaCalculo?.dadosEntrada?.empresa?.faturamento || 1000000;
+    const faturamento = resultado.memoriaCalculo.dadosEntrada.empresa.faturamento;
+    
+    // Garantir que os elementos canvas existam
+    garantirElementosGraficosDetalhamento();
     
     // Dados para gráfico PIS/COFINS
     const dadosPisCofins = anos.map(ano => {
         const percIVA = cronograma[ano];
         const percAtual = 1 - percIVA;
+        const faturamentoAno = faturamento * Math.pow(1.05, parseInt(ano) - 2026); // 5% crescimento
         return {
             ano: ano,
-            atual: (faturamento * 0.0925 * percAtual), // PIS+COFINS estimado
-            iva: (faturamento * 0.088 * percIVA) // CBS estimado
+            atual: (faturamentoAno * 0.0925 * percAtual), // PIS+COFINS estimado
+            iva: (faturamentoAno * 0.088 * percIVA) // CBS estimado
         };
     });
     
     // Renderizar gráfico PIS/COFINS
-    const canvasIdPisCofins = 'grafico-evolucao-pis-cofins';
-    const ctxPisCofins = document.getElementById(canvasIdPisCofins);
-    if (ctxPisCofins) {
-        const existingChartPisCofins = Chart.getChart(canvasIdPisCofins);
-        if (existingChartPisCofins) {
-            existingChartPisCofins.destroy();
-        }
-        new Chart(ctxPisCofins, {
-            type: 'line',
-            data: {
-                labels: anos,
-                datasets: [{
-                    label: 'PIS/COFINS Atual',
-                    data: dadosPisCofins.map(d => d.atual),
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)'
-                }, {
-                    label: 'CBS (IVA)',
-                    data: dadosPisCofins.map(d => d.iva),
-                    borderColor: 'rgb(54, 162, 235)',
-                    backgroundColor: 'rgba(54, 162, 235, 0.2)'
-                }]
+    renderizarGraficoIndividual('grafico-evolucao-pis-cofins', {
+        type: 'line',
+        data: {
+            labels: anos,
+            datasets: [{
+                label: 'PIS/COFINS Atual',
+                data: dadosPisCofins.map(d => d.atual),
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                borderWidth: 2
+            }, {
+                label: 'CBS (IVA)',
+                data: dadosPisCofins.map(d => d.iva),
+                borderColor: 'rgb(54, 162, 235)',
+                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Evolução PIS/COFINS → CBS'
+                }
             },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Evolução PIS/COFINS → CBS'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return 'R$ ' + value.toLocaleString('pt-BR');
-                            }
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return 'R$ ' + value.toLocaleString('pt-BR');
                         }
                     }
                 }
             }
-        });
-    }
+        }
+    });
     
     // Renderizar gráfico ICMS
-    const canvasIdICMS = 'grafico-evolucao-icms';
-    const ctxICMS = document.getElementById(canvasIdICMS);
-    if (ctxICMS) {
-        const existingChartICMS = Chart.getChart(canvasIdICMS);
-        if (existingChartICMS) {
-            existingChartICMS.destroy();
-        }
-        new Chart(ctxICMS, {
-            type: 'line',
-            data: {
-                labels: anos,
-                datasets: [{
-                    label: 'ICMS Atual',
-                    data: anos.map(ano => {
-                        const percAtual = 1 - cronograma[ano];
-                        return (faturamento * 0.18 * percAtual);
-                    }),
-                    borderColor: 'rgb(255, 99, 132)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)'
-                }, {
-                    label: 'IBS (IVA)',
-                    data: anos.map(ano => {
-                        const percIVA = cronograma[ano];
-                        return (faturamento * 0.177 * percIVA);
-                    }),
-                    borderColor: 'rgb(153, 102, 255)',
-                    backgroundColor: 'rgba(153, 102, 255, 0.2)'
-                }]
+    renderizarGraficoIndividual('grafico-evolucao-icms', {
+        type: 'line',
+        data: {
+            labels: anos,
+            datasets: [{
+                label: 'ICMS Atual',
+                data: anos.map(ano => {
+                    const percAtual = 1 - cronograma[ano];
+                    const faturamentoAno = faturamento * Math.pow(1.05, parseInt(ano) - 2026);
+                    return (faturamentoAno * 0.18 * percAtual);
+                }),
+                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                borderWidth: 2
+            }, {
+                label: 'IBS (IVA)',
+                data: anos.map(ano => {
+                    const percIVA = cronograma[ano];
+                    const faturamentoAno = faturamento * Math.pow(1.05, parseInt(ano) - 2026);
+                    return (faturamentoAno * 0.177 * percIVA);
+                }),
+                borderColor: 'rgb(153, 102, 255)',
+                backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Evolução ICMS → IBS'
+                }
             },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Evolução ICMS → IBS'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return 'R$ ' + value.toLocaleString('pt-BR');
-                            }
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return 'R$ ' + value.toLocaleString('pt-BR');
                         }
                     }
                 }
             }
-        });
-    }
+        }
+    });
     
     // Renderizar gráfico IPI
-    const canvasIdIPI = 'grafico-evolucao-ipi';
-    const ctxIPI = document.getElementById(canvasIdIPI);
-    if (ctxIPI) {
-        const existingChartIPI = Chart.getChart(canvasIdIPI);
-        if (existingChartIPI) {
-            existingChartIPI.destroy();
-        }
-        new Chart(ctxIPI, {
-            type: 'bar',
-            data: {
-                labels: anos,
-                datasets: [{
-                    label: 'IPI Atual',
-                    data: anos.map(ano => {
-                        const percAtual = 1 - cronograma[ano];
-                        return (faturamento * 0.10 * percAtual);
-                    }),
-                    backgroundColor: 'rgba(255, 206, 86, 0.7)',
-                    borderColor: 'rgba(255, 206, 86, 1)',
-                    borderWidth: 1
-                }]
+    renderizarGraficoIndividual('grafico-evolucao-ipi', {
+        type: 'bar',
+        data: {
+            labels: anos,
+            datasets: [{
+                label: 'IPI Atual',
+                data: anos.map(ano => {
+                    const percAtual = 1 - cronograma[ano];
+                    const faturamentoAno = faturamento * Math.pow(1.05, parseInt(ano) - 2026);
+                    return (faturamentoAno * 0.10 * percAtual);
+                }),
+                backgroundColor: 'rgba(255, 206, 86, 0.7)',
+                borderColor: 'rgba(255, 206, 86, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Evolução IPI'
+                }
             },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Evolução IPI'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return 'R$ ' + value.toLocaleString('pt-BR');
-                            }
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return 'R$ ' + value.toLocaleString('pt-BR');
                         }
                     }
                 }
             }
-        });
-    }
+        }
+    });
     
     // Renderizar gráfico Total
-    const canvasIdTotal = 'grafico-evolucao-total';
-    const ctxTotal = document.getElementById(canvasIdTotal);
-    if (ctxTotal) {
-        const existingChartTotal = Chart.getChart(canvasIdTotal);
-        if (existingChartTotal) {
-            existingChartTotal.destroy();
-        }
-        new Chart(ctxTotal, {
-            type: 'bar',
-            data: {
-                labels: anos,
-                datasets: [{
-                    label: 'Total de Impostos',
-                    data: anos.map(ano => {
-                        const percIVA = cronograma[ano];
-                        const percAtual = 1 - percIVA;
-                        const sistemaAtual = faturamento * 0.265 * percAtual; // Alíquota média atual
-                        const sistemaIVA = faturamento * 0.265 * percIVA; // IVA equivalente
-                        return sistemaAtual + sistemaIVA;
-                    }),
-                    backgroundColor: '#2ecc71',
-                    borderColor: '#27ae60',
-                    borderWidth: 1
-                }]
+    renderizarGraficoIndividual('grafico-evolucao-total', {
+        type: 'bar',
+        data: {
+            labels: anos,
+            datasets: [{
+                label: 'Total de Impostos',
+                data: anos.map(ano => {
+                    const percIVA = cronograma[ano];
+                    const percAtual = 1 - percIVA;
+                    const faturamentoAno = faturamento * Math.pow(1.05, parseInt(ano) - 2026);
+                    const sistemaAtual = faturamentoAno * 0.265 * percAtual; // Alíquota média atual
+                    const sistemaIVA = faturamentoAno * 0.265 * percIVA; // IVA equivalente
+                    return sistemaAtual + sistemaIVA;
+                }),
+                backgroundColor: '#2ecc71',
+                borderColor: '#27ae60',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Total de Impostos Durante Transição'
+                }
             },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Total de Impostos Durante Transição'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return 'R$ ' + value.toLocaleString('pt-BR');
-                            }
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return 'R$ ' + value.toLocaleString('pt-BR');
                         }
                     }
                 }
             }
-        });
+        }
+    });
+    
+    console.log('Gráficos de detalhamento renderizados com sucesso');
+}
+
+/**
+ * Função auxiliar para renderizar gráfico individual
+ */
+function renderizarGraficoIndividual(canvasId, config) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        console.warn(`Canvas ${canvasId} não encontrado`);
+        return;
     }
     
-    console.log('Gráficos de detalhamento renderizados');
+    // Destruir gráfico anterior se existir
+    const existingChart = Chart.getChart(canvasId);
+    if (existingChart) {
+        existingChart.destroy();
+    }
+    
+    const ctx = canvas.getContext('2d');
+    new Chart(ctx, config);
+}
+
+/**
+ * Garante que os elementos canvas para gráficos de detalhamento existam
+ */
+function garantirElementosGraficosDetalhamento() {
+    const graficosNecessarios = [
+        { id: 'grafico-evolucao-pis-cofins', titulo: 'Evolução PIS/COFINS → CBS' },
+        { id: 'grafico-evolucao-icms', titulo: 'Evolução ICMS → IBS' },
+        { id: 'grafico-evolucao-ipi', titulo: 'Evolução IPI' },
+        { id: 'grafico-evolucao-total', titulo: 'Total de Impostos Durante Transição' }
+    ];
+
+    graficosNecessarios.forEach(grafico => {
+        let canvas = document.getElementById(grafico.id);
+        
+        if (!canvas) {
+            console.log(`Criando elemento canvas para ${grafico.titulo}`);
+            
+            // Procurar container para detalhamento
+            let container = document.querySelector('#detalhamento-impostos-transicao') ||
+                           document.querySelector('#evolucao-tributaria') ||
+                           document.querySelector('#resultados-detalhados');
+            
+            if (!container) {
+                // Criar seção de detalhamento se não existir
+                container = document.createElement('div');
+                container.id = 'detalhamento-impostos-transicao';
+                container.className = 'detalhamento-container';
+                
+                const resultados = document.querySelector('#resultados') || document.body;
+                resultados.appendChild(container);
+            }
+
+            // Criar estrutura completa para o gráfico
+            const graficoWrapper = document.createElement('div');
+            graficoWrapper.className = 'grafico-detalhamento mb-4';
+            graficoWrapper.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title">${grafico.titulo}</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" style="position: relative; height: 400px;">
+                            <canvas id="${grafico.id}"></canvas>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(graficoWrapper);
+            console.log(`Canvas ${grafico.id} criado com sucesso`);
+        }
+    });
 }
 
 /**
@@ -1725,38 +1932,18 @@ function atualizarVisualizacaoEstrategias() {
         // 3. Verificar se existem resultados de estratégias usando a classe específica
         const hasActualResults = divResultados.querySelector('.estrategias-resumo');
         
-        // 4. Se existem resultados, apenas atualizar os gráficos (não sobrescrever HTML)
+        // 4. Se existem resultados, atualizar para o ano selecionado
         if (hasActualResults) {
-            console.log('MAIN.JS: Resultados detalhados de estratégias encontrados. Atualizando visualização...');
+            console.log('MAIN.JS: Resultados detalhados de estratégias encontrados. Atualizando para ano selecionado...');
             
-            // Atualizar visualização para o ano selecionado (se aplicável)
-            const seletorAno = document.getElementById('ano-visualizacao-estrategias');
-            if (seletorAno) {
-                const anoSelecionado = parseInt(seletorAno.value);
-                console.log(`MAIN.JS: Ano de visualização selecionado: ${anoSelecionado}`);
-                
-                // Implementar lógica específica para atualização por ano, se necessário
-                // ...
-            }
+            // Obter ano selecionado para estratégias
+            const seletorAnoEstrategias = document.getElementById('ano-visualizacao-estrategias');
+            const anoSelecionado = seletorAnoEstrategias ? parseInt(seletorAnoEstrategias.value) : 2026;
             
-            // Renderizar novamente os gráficos com os resultados existentes
-            if (window.lastStrategyResults && window.resultadosSimulacao && window.resultadosSimulacao.impactoBase &&
-                typeof window.ChartManager !== 'undefined' && 
-                typeof window.ChartManager.renderizarGraficoEstrategias === 'function') {
-                
-                console.log('MAIN.JS: Re-renderizando gráficos de estratégias com dados existentes.');
-                try {
-                    window.ChartManager.renderizarGraficoEstrategias(
-                        window.lastStrategyResults, 
-                        window.resultadosSimulacao.impactoBase
-                    );
-                } catch (erroChart) {
-                    console.warn('MAIN.JS: Erro ao re-renderizar gráficos de estratégias:', erroChart);
-                }
-            } else {
-                console.warn('MAIN.JS: Dados insuficientes para re-renderizar gráficos.');
-            }
+            console.log(`MAIN.JS: Recalculando estratégias para o ano: ${anoSelecionado}`);
             
+            // Recalcular estratégias para o ano específico
+            recalcularEstrategiasParaAno(anoSelecionado);
             return;
         }
 
@@ -1812,6 +1999,146 @@ function atualizarVisualizacaoEstrategias() {
         }
     }
 }
+
+/**
+ * Recalcula estratégias para um ano específico
+ * @param {number} ano - Ano para recálculo
+ */
+function recalcularEstrategiasParaAno(ano) {
+    console.log(`MAIN.JS: Recalculando estratégias para o ano ${ano}`);
+
+    try {
+        // Obter dados validados
+        const dadosAninhados = window.DataManager.obterDadosDoFormulario();
+        const dadosPlanos = window.DataManager.converterParaEstruturaPlana(dadosAninhados);
+
+        // Filtrar estratégias ativas
+        const estrategiasAtivas = {};
+        let temEstrategiaAtiva = false;
+
+        if (dadosAninhados.estrategias) {
+            Object.entries(dadosAninhados.estrategias).forEach(([chave, estrategia]) => {
+                if (estrategia?.ativar === true) {
+                    estrategiasAtivas[chave] = estrategia;
+                    temEstrategiaAtiva = true;
+                }
+            });
+        }
+
+        if (!temEstrategiaAtiva) {
+            console.warn('MAIN.JS: Nenhuma estratégia ativa para recalcular');
+            return;
+        }
+
+        // Calcular impacto base para o ano específico
+        const impactoBaseAno = window.IVADualSystem.calcularImpactoCapitalGiro(dadosPlanos, ano);
+
+        // Calcular efetividade das estratégias para o ano específico
+        const resultadoEstrategias = window.IVADualSystem.calcularEfeitividadeMitigacao(
+            dadosPlanos,
+            estrategiasAtivas,
+            ano
+        );
+
+        // Armazenar resultados atualizados
+        window.lastStrategyResults = resultadoEstrategias;
+        window.lastStrategyYear = ano;
+
+        // Atualizar interface com resultados do ano específico
+        atualizarInterfaceEstrategiasParaAno(resultadoEstrategias, impactoBaseAno, ano);
+
+        // Atualizar gráficos se disponível
+        if (typeof window.ChartManager !== 'undefined' && 
+            typeof window.ChartManager.renderizarGraficoEstrategias === 'function') {
+            
+            console.log('MAIN.JS: Renderizando gráficos de estratégias para o ano', ano);
+            window.ChartManager.renderizarGraficoEstrategias(resultadoEstrategias, impactoBaseAno);
+        }
+
+        console.log(`MAIN.JS: Recálculo de estratégias para ${ano} concluído com sucesso`);
+
+    } catch (erro) {
+        console.error(`MAIN.JS: Erro ao recalcular estratégias para o ano ${ano}:`, erro);
+        
+        const divResultados = document.getElementById('resultados-estrategias');
+        if (divResultados) {
+            divResultados.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>Erro no Recálculo:</strong> Não foi possível recalcular as estratégias para ${ano}.
+                    <br>Detalhes: ${erro.message}
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Atualiza interface de estratégias com dados específicos do ano
+ * @param {Object} resultadoEstrategias - Resultados das estratégias
+ * @param {Object} impactoBase - Impacto base para o ano
+ * @param {number} ano - Ano de referência
+ */
+function atualizarInterfaceEstrategiasParaAno(resultadoEstrategias, impactoBase, ano) {
+    const divResultados = document.getElementById('resultados-estrategias');
+    if (!divResultados) return;
+
+    const impactoOriginal = Math.abs(impactoBase.diferencaCapitalGiro || 0);
+    const efetividade = resultadoEstrategias.efeitividadeCombinada;
+    const percentualImplementacao = window.CurrentTaxSystem.obterPercentualImplementacao(ano);
+
+    // Template com informações específicas do ano
+    const htmlTemplate = `
+        <div class="estrategias-resumo">
+            <div class="ano-contexto mb-3">
+                <h4>Resultados das Estratégias - Ano ${ano}</h4>
+                <div class="implementacao-badge">
+                    <span class="badge badge-primary">Split Payment: ${(percentualImplementacao * 100).toFixed(0)}% implementado</span>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="resultado-destaque">
+                        <label class="form-label">Impacto Original (${ano}):</label>
+                        <div class="valor-destaque text-danger">${window.CalculationCore.formatarMoeda(impactoOriginal)}</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="resultado-destaque">
+                        <label class="form-label">Efetividade da Mitigação:</label>
+                        <div class="valor-destaque text-success">${(efetividade.efetividadePercentual || 0).toFixed(1)}%</div>
+                    </div>
+                </div>
+            </div>
+            <div class="resultados-detalhados mt-3">
+                <div class="row">
+                    <div class="col-md-3">
+                        <strong>Impacto Mitigado:</strong><br>
+                        <span class="text-success">${window.CalculationCore.formatarMoeda(efetividade.mitigacaoTotal || 0)}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Impacto Residual:</strong><br>
+                        <span class="text-warning">${window.CalculationCore.formatarMoeda(impactoOriginal - (efetividade.mitigacaoTotal || 0))}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Custo Total:</strong><br>
+                        <span class="text-info">${window.CalculationCore.formatarMoeda(efetividade.custoTotal || 0)}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Relação C/B:</strong><br>
+                        <span class="text-muted">${(efetividade.custoBeneficio || 0).toFixed(2)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    divResultados.innerHTML = htmlTemplate;
+    console.log(`MAIN.JS: Interface de estratégias atualizada para o ano ${ano}`);
+}
+
+// Exportar funções necessárias para o escopo global
+window.atualizarInterfaceEstrategiasParaAno = atualizarInterfaceEstrategiasParaAno;
+window.recalcularEstrategiasParaAno = recalcularEstrategiasParaAno;
 
 function inicializarRepository() {
     // Verificar se o repository já existe
@@ -2443,20 +2770,51 @@ function obterDadosSpedPrioritarios() {
 
 // Função para mostrar o painel de resultados
 function mostrarPainelResultados() {
-    const resultsSection = document.getElementById('results-section');
-    if (resultsSection) {
-        resultsSection.style.display = 'block';
+    // Mostrar múltiplas seções de resultados possíveis
+    const seletoresResultados = [
+        '#results-section',
+        '#resultados-detalhados', 
+        '#resultados',
+        '.results-container'
+    ];
+
+    let painelEncontrado = false;
+
+    seletoresResultados.forEach(seletor => {
+        const painel = document.querySelector(seletor);
+        if (painel) {
+            painel.style.display = 'block';
+            painel.style.visibility = 'visible';
+            painelEncontrado = true;
+            console.log(`Painel ${seletor} exibido`);
+        }
+    });
+
+    // Se não encontrou nenhum painel, criar um básico
+    if (!painelEncontrado) {
+        console.log('Criando painel de resultados básico');
+        const painelResultados = document.createElement('div');
+        painelResultados.id = 'resultados-detalhados';
+        painelResultados.className = 'results-container';
+        painelResultados.style.display = 'block';
         
-        // Scroll suave para os resultados
-        setTimeout(() => {
-            resultsSection.scrollIntoView({ 
+        // Inserir após o formulário de simulação
+        const formSimulacao = document.querySelector('#simulacao') || document.querySelector('form') || document.body;
+        formSimulacao.parentNode.insertBefore(painelResultados, formSimulacao.nextSibling);
+    }
+    
+    // Scroll suave para os resultados com delay maior
+    setTimeout(() => {
+        const painelVisivel = document.querySelector('#results-section, #resultados-detalhados, #resultados');
+        if (painelVisivel) {
+            painelVisivel.scrollIntoView({ 
                 behavior: 'smooth',
                 block: 'start'
             });
-        }, 100);
-        
-        console.log('Painel de resultados exibido');
-    }
+        }
+    }, 300);
+    
+    console.log('Painel de resultados processado');
 }
 
 // SUBSTITUIR o bloco DOMContentLoaded extenso por:
@@ -2897,6 +3255,19 @@ function configurarEventosEstrategias() {
                 alert('Não foi possível simular estratégias. Verifique se todos os módulos foram carregados corretamente.');
             }
         });
+    }
+    
+    // Event listener para seletor de ano de estratégias
+    const seletorAnoEstrategias = document.getElementById('ano-visualizacao-estrategias');
+    if (seletorAnoEstrategias) {
+        seletorAnoEstrategias.addEventListener('change', function() {
+            console.log('Ano de visualização de estratégias alterado para:', this.value);
+            // Usar a função existente que já tem a lógica de verificação
+            atualizarVisualizacaoEstrategias();
+        });
+        console.log('Event listener para ano de visualização de estratégias configurado');
+    } else {
+        console.warn('Seletor de ano de visualização de estratégias não encontrado no DOM');
     }
 }
 
@@ -3341,17 +3712,47 @@ function finalizarInicializacao() {
         window.CurrencyFormatter.inicializar();
     }
     
+    // ADICIONAR: Inicializar ChartManager
+    if (window.ChartManager && typeof window.ChartManager.inicializar === 'function') {
+        window.ChartManager.inicializar();
+        console.log('ChartManager inicializado');
+    } else {
+        console.warn('ChartManager não encontrado durante inicialização');
+    }
+    
+    // ADICIONAR: Inicializar seletor de ano para estratégias
+    inicializarSeletorAnoEstrategias();
+    
     window.processandoSPED = false;
     configurarGerenciamentoSPED();
 }
 
-function finalizarInicializacao() {
-    if (window.CurrencyFormatter && typeof window.CurrencyFormatter.inicializar === 'function') {
-        window.CurrencyFormatter.inicializar();
-    }
+/**
+ * Inicializa o seletor de ano para estratégias com o mesmo valor da simulação principal
+ */
+function inicializarSeletorAnoEstrategias() {
+    const seletorAnoPrincipal = document.getElementById('ano-visualizacao');
+    const seletorAnoEstrategias = document.getElementById('ano-visualizacao-estrategias');
     
-    window.processandoSPED = false;
-    configurarGerenciamentoSPED();
+    if (seletorAnoPrincipal && seletorAnoEstrategias) {
+        // Sincronizar valor inicial
+        seletorAnoEstrategias.value = seletorAnoPrincipal.value;
+        
+        // Sincronizar mudanças do seletor principal para estratégias
+        seletorAnoPrincipal.addEventListener('change', function() {
+            seletorAnoEstrategias.value = this.value;
+            
+            // Se há resultados de estratégias, atualizar automaticamente
+            if (window.lastStrategyResults) {
+                // CORREÇÃO: Usar a função existente em vez da removida
+                atualizarVisualizacaoEstrategias();
+            }
+        });
+        
+        console.log('Seletor de ano para estratégias inicializado e sincronizado');
+    } else {
+        console.warn('Seletores de ano não encontrados para sincronização');
+    }
 }
 
 /**
