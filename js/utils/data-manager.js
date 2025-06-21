@@ -126,6 +126,48 @@ window.DataManager = (function() {
             2033: 1.00                // Decimal (0-1)
         }
     };
+    
+    /**
+     * Cache para otimização de validações
+     */
+    const ValidationCache = (function() {
+        const cache = new Map();
+        const maxCacheSize = 50;
+
+        function generateHash(data) {
+            return JSON.stringify(data);
+        }
+
+        function get(data) {
+            const hash = generateHash(data);
+            const cached = cache.get(hash);
+            if (cached && (Date.now() - cached.timestamp) < 30000) { // Cache válido por 30s
+                return cached.result;
+            }
+            return null;
+        }
+
+        function set(data, result) {
+            const hash = generateHash(data);
+
+            // Limpar cache se muito grande
+            if (cache.size >= maxCacheSize) {
+                const firstKey = cache.keys().next().value;
+                cache.delete(firstKey);
+            }
+
+            cache.set(hash, {
+                result: JSON.parse(JSON.stringify(result)),
+                timestamp: Date.now()
+            });
+        }
+
+        function clear() {
+            cache.clear();
+        }
+
+        return { get, set, clear };
+    })();
 
     /**
      * Retorna uma cópia profunda da estrutura aninhada padrão
@@ -136,7 +178,7 @@ window.DataManager = (function() {
     }
 
     /**
-     * Converte a estrutura aninhada para estrutura plana para cálculos
+     * Converte a estrutura aninhada para estrutura plana para cálculos (versão otimizada)
      * @param {Object} dadosAninhados - Dados na estrutura aninhada
      * @returns {Object} - Dados na estrutura plana para cálculos
      */
@@ -155,7 +197,7 @@ window.DataManager = (function() {
         // Conversão otimizada sem logs desnecessários
         const plano = {};
 
-        // Empresa
+        // Empresa - atribuição direta
         if (dadosAninhados.empresa) {
             Object.assign(plano, {
                 faturamento: dadosAninhados.empresa.faturamento || 0,
@@ -167,7 +209,7 @@ window.DataManager = (function() {
             });
         }
 
-        // Ciclo Financeiro
+        // Ciclo Financeiro - atribuição direta
         if (dadosAninhados.cicloFinanceiro) {
             Object.assign(plano, {
                 pmr: dadosAninhados.cicloFinanceiro.pmr || 30,
@@ -365,300 +407,175 @@ window.DataManager = (function() {
     }
     
     /**
-     * Valida e normaliza os dados na estrutura aninhada
+     * Valida e normaliza os dados na estrutura aninhada (versão otimizada)
      * @param {Object} dados - Dados a serem validados
+     * @param {boolean} forceValidation - Força validação mesmo se em cache
      * @returns {Object} - Dados validados e normalizados
      */
-    function validarENormalizar(dados) {
-        console.log('=== DATAMANAGER: INÍCIO DA VALIDAÇÃO E NORMALIZAÇÃO ===');
-        console.log('Tipo da estrutura de entrada:', detectarTipoEstrutura(dados));
-
-        // Verificar estruturas de créditos na entrada
-        if (dados.parametrosFiscais) {
-            if (dados.parametrosFiscais.creditos) {
-                console.log('parametrosFiscais.creditos encontrado:', 
-                    JSON.stringify(dados.parametrosFiscais.creditos, null, 2));
-            }
-
-            if (dados.parametrosFiscais.composicaoTributaria && 
-                dados.parametrosFiscais.composicaoTributaria.creditos) {
-                console.log('parametrosFiscais.composicaoTributaria.creditos encontrado:', 
-                    JSON.stringify(dados.parametrosFiscais.composicaoTributaria.creditos, null, 2));
+    function validarENormalizar(dados, forceValidation = false) {
+        // Verificar cache primeiro (apenas se não forçar validação)
+        if (!forceValidation) {
+            const cached = ValidationCache.get(dados);
+            if (cached) {
+                return cached;
             }
         }
-        
+
+        // Log condicional (apenas em modo debug)
+        if (window.DEBUG_MODE) {
+            console.log('=== DATAMANAGER: INÍCIO DA VALIDAÇÃO E NORMALIZAÇÃO ===');
+            console.log('Tipo da estrutura de entrada:', detectarTipoEstrutura(dados));
+        }
+
         // Fazer uma cópia defensiva
         const resultado = JSON.parse(JSON.stringify(dados || {}));
-        
-        // Validação de Empresa
-        if (!resultado.empresa) resultado.empresa = {...estruturaPadrao.empresa};
-        
-        // Garantir que faturamento seja numérico
-        if (typeof resultado.empresa.faturamento === 'string') {
-            resultado.empresa.faturamento = parseFloat(resultado.empresa.faturamento.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
-        }
-        
-        // Converter porcentagens para decimal se necessário
-        if (resultado.empresa.margem > 1) {
-            resultado.empresa.margem = resultado.empresa.margem / 100;
-        }
-        
-        // Garantir valores não-negativos
-        resultado.empresa.faturamento = Math.max(0, resultado.empresa.faturamento);
-        resultado.empresa.margem = Math.max(0, Math.min(1, resultado.empresa.margem)); // Entre 0 e 1
-        
-        // Validar tipo de empresa
-        const tiposEmpresaValidos = ['comercio', 'industria', 'servicos'];
-        if (!tiposEmpresaValidos.includes(resultado.empresa.tipoEmpresa)) {
-            console.warn(`Tipo de empresa inválido: "${resultado.empresa.tipoEmpresa}". Utilizando valor padrão vazio.`);
-            resultado.empresa.tipoEmpresa = '';
-        }
-        
-        // Validar regime tributário
-        const regimesTributariosValidos = ['simples', 'presumido', 'real'];
-        if (!regimesTributariosValidos.includes(resultado.empresa.regime)) {
-            console.warn(`Regime tributário inválido: "${resultado.empresa.regime}". Utilizando valor padrão vazio.`);
-            resultado.empresa.regime = '';
-        }
-        
-        // Validação Ciclo Financeiro
-        if (!resultado.cicloFinanceiro) resultado.cicloFinanceiro = {...estruturaPadrao.cicloFinanceiro};
-        
-        // Garantir valores não-negativos para prazos
-        resultado.cicloFinanceiro.pmr = Math.max(0, resultado.cicloFinanceiro.pmr || 0);
-        resultado.cicloFinanceiro.pmp = Math.max(0, resultado.cicloFinanceiro.pmp || 0);
-        resultado.cicloFinanceiro.pme = Math.max(0, resultado.cicloFinanceiro.pme || 0);
-        
-        // Converter porcentagens para decimal
-        if (resultado.cicloFinanceiro.percVista > 1) {
-            resultado.cicloFinanceiro.percVista = resultado.cicloFinanceiro.percVista / 100;
-        }
-        
-        if (resultado.cicloFinanceiro.percPrazo > 1) {
-            resultado.cicloFinanceiro.percPrazo = resultado.cicloFinanceiro.percPrazo / 100;
-        }
-        
-        // Garantir percentuais entre 0 e 1
-        resultado.cicloFinanceiro.percVista = Math.max(0, Math.min(1, resultado.cicloFinanceiro.percVista));
-        resultado.cicloFinanceiro.percPrazo = Math.max(0, Math.min(1, resultado.cicloFinanceiro.percPrazo));
-        
-        // Garantir que a soma seja 1
-        const somaPercs = resultado.cicloFinanceiro.percVista + resultado.cicloFinanceiro.percPrazo;
-        if (Math.abs(somaPercs - 1) > 0.01) {
-            // Ajustar para garantir soma = 1
-            console.warn(`Soma dos percentuais de vendas (${somaPercs}) não é 1. Ajustando...`);
-            
-            if (somaPercs === 0) {
-                // Se ambos são zero, usar valores padrão
-                resultado.cicloFinanceiro.percVista = 0.3;
-                resultado.cicloFinanceiro.percPrazo = 0.7;
-            } else {
-                // Normalizar proporcionalmente
-                resultado.cicloFinanceiro.percVista = resultado.cicloFinanceiro.percVista / somaPercs;
-                resultado.cicloFinanceiro.percPrazo = resultado.cicloFinanceiro.percPrazo / somaPercs;
-            }
-        }
-        
-        // Validação Parâmetros Fiscais
-        if (!resultado.parametrosFiscais) resultado.parametrosFiscais = {...estruturaPadrao.parametrosFiscais};
-        
-        // Converter alíquota para decimal se necessário
-        if (resultado.parametrosFiscais.aliquota > 1) {
-            resultado.parametrosFiscais.aliquota = resultado.parametrosFiscais.aliquota / 100;
-        }
-        
-        // Garantir alíquota entre 0 e 1
-        resultado.parametrosFiscais.aliquota = Math.max(0, Math.min(1, resultado.parametrosFiscais.aliquota));
-        
-        // Validar tipo de operação
-        const tiposOperacaoValidos = ['b2b', 'b2c', 'mista'];
-        if (resultado.parametrosFiscais.tipoOperacao && !tiposOperacaoValidos.includes(resultado.parametrosFiscais.tipoOperacao)) {
-            console.warn(`Tipo de operação inválido: "${resultado.parametrosFiscais.tipoOperacao}". Utilizando valor padrão vazio.`);
-            resultado.parametrosFiscais.tipoOperacao = '';
-        }
-        
-        // Validar regime PIS/COFINS
-        const regimesPisCofinsValidos = ['cumulativo', 'nao-cumulativo'];
-        if (resultado.parametrosFiscais.regimePisCofins && !regimesPisCofinsValidos.includes(resultado.parametrosFiscais.regimePisCofins)) {
-            console.warn(`Regime PIS/COFINS inválido: "${resultado.parametrosFiscais.regimePisCofins}". Utilizando valor padrão vazio.`);
-            resultado.parametrosFiscais.regimePisCofins = '';
-        }
-        
-        // Garantir que créditos existam e sejam não-negativos
-        if (!resultado.parametrosFiscais.creditos) {
-            resultado.parametrosFiscais.creditos = {...estruturaPadrao.parametrosFiscais.creditos};
+
+        // Validação otimizada de Empresa
+        if (!resultado.empresa) {
+            resultado.empresa = {...estruturaPadrao.empresa};
         } else {
-            // Normalizar todos os valores de créditos
-            Object.keys(estruturaPadrao.parametrosFiscais.creditos).forEach(key => {
-                if (resultado.parametrosFiscais.creditos[key] === undefined) {
-                    resultado.parametrosFiscais.creditos[key] = 0;
-                } else if (typeof resultado.parametrosFiscais.creditos[key] === 'string') {
-                    resultado.parametrosFiscais.creditos[key] = parseFloat(resultado.parametrosFiscais.creditos[key].replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
-                }
-                
-                // Garantir valores não-negativos
-                resultado.parametrosFiscais.creditos[key] = Math.max(0, resultado.parametrosFiscais.creditos[key]);
-            });
+            // Validação rápida apenas dos campos que mudaram
+            validarEmpresaOtimizada(resultado.empresa);
         }
-        
-        // Validação Parâmetros Simulação
-        if (!resultado.parametrosSimulacao) resultado.parametrosSimulacao = {...estruturaPadrao.parametrosSimulacao};
-        
-        // Validar cenário
-        const cenariosValidos = ['conservador', 'moderado', 'otimista', 'personalizado'];
-        if (!cenariosValidos.includes(resultado.parametrosSimulacao.cenario)) {
-            console.warn(`Cenário inválido: "${resultado.parametrosSimulacao.cenario}". Utilizando valor padrão "moderado".`);
-            resultado.parametrosSimulacao.cenario = 'moderado';
-        }
-        
-        // Converter taxa de crescimento para decimal se necessário
-        if (resultado.parametrosSimulacao.taxaCrescimento > 1) {
-            resultado.parametrosSimulacao.taxaCrescimento = resultado.parametrosSimulacao.taxaCrescimento / 100;
-        }
-        
-        // Garantir taxa entre 0 e 1
-        resultado.parametrosSimulacao.taxaCrescimento = Math.max(0, Math.min(1, resultado.parametrosSimulacao.taxaCrescimento));
-        
-        // Validar formato de datas
-        const regexData = /^\d{4}-\d{2}-\d{2}$/;
-        if (!regexData.test(resultado.parametrosSimulacao.dataInicial)) {
-            console.warn(`Data inicial inválida: "${resultado.parametrosSimulacao.dataInicial}". Utilizando valor padrão "2026-01-01".`);
-            resultado.parametrosSimulacao.dataInicial = '2026-01-01';
-        }
-        
-        if (!regexData.test(resultado.parametrosSimulacao.dataFinal)) {
-            console.warn(`Data final inválida: "${resultado.parametrosSimulacao.dataFinal}". Utilizando valor padrão "2033-12-31".`);
-            resultado.parametrosSimulacao.dataFinal = '2033-12-31';
-        }
-        
-        // Garantir que data final seja posterior à data inicial
-        if (resultado.parametrosSimulacao.dataFinal < resultado.parametrosSimulacao.dataInicial) {
-            console.warn(`Data final (${resultado.parametrosSimulacao.dataFinal}) é anterior à data inicial (${resultado.parametrosSimulacao.dataInicial}). Invertendo datas.`);
-            [resultado.parametrosSimulacao.dataInicial, resultado.parametrosSimulacao.dataFinal] = 
-            [resultado.parametrosSimulacao.dataFinal, resultado.parametrosSimulacao.dataInicial];
-        }
-        
-        // Validação Parâmetros Financeiros
-        if (!resultado.parametrosFinanceiros) resultado.parametrosFinanceiros = {...estruturaPadrao.parametrosFinanceiros};
-        
-        // Converter taxas para decimal se necessário
-        if (resultado.parametrosFinanceiros.taxaCapitalGiro > 1) {
-            resultado.parametrosFinanceiros.taxaCapitalGiro = resultado.parametrosFinanceiros.taxaCapitalGiro / 100;
-        }
-        
-        if (resultado.parametrosFinanceiros.taxaAntecipacao > 1) {
-            resultado.parametrosFinanceiros.taxaAntecipacao = resultado.parametrosFinanceiros.taxaAntecipacao / 100;
-        }
-        
-        if (resultado.parametrosFinanceiros.spreadBancario > 1) {
-            resultado.parametrosFinanceiros.spreadBancario = resultado.parametrosFinanceiros.spreadBancario / 100;
-        }
-        
-        // Garantir taxas não-negativas
-        resultado.parametrosFinanceiros.taxaCapitalGiro = Math.max(0, resultado.parametrosFinanceiros.taxaCapitalGiro);
-        resultado.parametrosFinanceiros.taxaAntecipacao = Math.max(0, resultado.parametrosFinanceiros.taxaAntecipacao);
-        resultado.parametrosFinanceiros.spreadBancario = Math.max(0, resultado.parametrosFinanceiros.spreadBancario);
-        
-        // Validação IVA Config
-        if (!resultado.ivaConfig) resultado.ivaConfig = {...estruturaPadrao.ivaConfig};
-        
-        // Converter alíquotas para decimal se necessário
-        if (resultado.ivaConfig.cbs > 1) {
-            resultado.ivaConfig.cbs = resultado.ivaConfig.cbs / 100;
-        }
-        
-        if (resultado.ivaConfig.ibs > 1) {
-            resultado.ivaConfig.ibs = resultado.ivaConfig.ibs / 100;
-        }
-        
-        if (resultado.ivaConfig.reducaoEspecial > 1) {
-            resultado.ivaConfig.reducaoEspecial = resultado.ivaConfig.reducaoEspecial / 100;
-        }
-        
-        // Garantir alíquotas entre 0 e 1
-        resultado.ivaConfig.cbs = Math.max(0, Math.min(1, resultado.ivaConfig.cbs));
-        resultado.ivaConfig.ibs = Math.max(0, Math.min(1, resultado.ivaConfig.ibs));
-        resultado.ivaConfig.reducaoEspecial = Math.max(0, Math.min(1, resultado.ivaConfig.reducaoEspecial));
-        
-        // Validar categoria IVA
-        const categoriasIvaValidas = ['standard', 'reduced', 'exempt'];
-        if (!categoriasIvaValidas.includes(resultado.ivaConfig.categoriaIva)) {
-            console.warn(`Categoria IVA inválida: "${resultado.ivaConfig.categoriaIva}". Utilizando valor padrão "standard".`);
-            resultado.ivaConfig.categoriaIva = 'standard';
-        }
-        
-        // Validação do Cronograma
-        if (!resultado.cronogramaImplementacao) {
-            resultado.cronogramaImplementacao = {...estruturaPadrao.cronogramaImplementacao};
+
+        // Validação otimizada de Ciclo Financeiro
+        if (!resultado.cicloFinanceiro) {
+            resultado.cicloFinanceiro = {...estruturaPadrao.cicloFinanceiro};
         } else {
-            // Garantir que todos os anos de 2026 a 2033 estão presentes
-            for (let ano = 2026; ano <= 2033; ano++) {
-                if (resultado.cronogramaImplementacao[ano] === undefined) {
-                    resultado.cronogramaImplementacao[ano] = estruturaPadrao.cronogramaImplementacao[ano];
-                } else {
-                    // Converter para decimal se necessário
-                    if (resultado.cronogramaImplementacao[ano] > 1) {
-                        resultado.cronogramaImplementacao[ano] = resultado.cronogramaImplementacao[ano] / 100;
-                    }
-                    
-                    // Garantir valores entre 0 e 1
-                    resultado.cronogramaImplementacao[ano] = Math.max(0, Math.min(1, resultado.cronogramaImplementacao[ano]));
-                }
-            }
-            
-            // Verificar se o cronograma tem uma progressão crescente
-            let valorAnterior = 0;
-            let progressaoCrescente = true;
-            
-            for (let ano = 2026; ano <= 2033; ano++) {
-                if (resultado.cronogramaImplementacao[ano] < valorAnterior) {
-                    progressaoCrescente = false;
-                    break;
-                }
-                valorAnterior = resultado.cronogramaImplementacao[ano];
-            }
-            
-            if (!progressaoCrescente) {
-                console.warn('Cronograma não tem progressão crescente. Ajustando...');
-                resultado.cronogramaImplementacao = {...estruturaPadrao.cronogramaImplementacao};
-            }
+            validarCicloFinanceiroOtimizado(resultado.cicloFinanceiro);
         }
-        
-        // Validação de Estratégias
-        if (!resultado.estrategias) {
-            resultado.estrategias = JSON.parse(JSON.stringify(estruturaPadrao.estrategias));
+
+        // Validação otimizada de Parâmetros Fiscais
+        if (!resultado.parametrosFiscais) {
+            resultado.parametrosFiscais = {...estruturaPadrao.parametrosFiscais};
         } else {
-            // Garantir que todas as estratégias existem
-            Object.keys(estruturaPadrao.estrategias).forEach(estrategiaKey => {
-                if (!resultado.estrategias[estrategiaKey]) {
-                    resultado.estrategias[estrategiaKey] = {...estruturaPadrao.estrategias[estrategiaKey]};
-                } else {
-                    // Garantir que todos os campos da estratégia existem
-                    Object.keys(estruturaPadrao.estrategias[estrategiaKey]).forEach(campoKey => {
-                        if (resultado.estrategias[estrategiaKey][campoKey] === undefined) {
-                            resultado.estrategias[estrategiaKey][campoKey] = estruturaPadrao.estrategias[estrategiaKey][campoKey];
-                        }
-                    });
-                    
-                    // Validações específicas para cada estratégia poderiam ser adicionadas aqui
-                }
-            });
+            validarParametrosFiscaisOtimizado(resultado.parametrosFiscais);
         }
-        
-        // Verificar estrutura de créditos na saída
-        console.log('=== DATAMANAGER: RESULTADO DA VALIDAÇÃO E NORMALIZAÇÃO ===');
-        if (resultado.parametrosFiscais && resultado.parametrosFiscais.creditos) {
+
+        // Aplicar outras validações de forma otimizada
+        aplicarValidacoesRapidas(resultado);
+
+        // Log condicional do resultado
+        if (window.DEBUG_MODE && resultado.parametrosFiscais?.creditos) {
+            console.log('=== DATAMANAGER: RESULTADO DA VALIDAÇÃO E NORMALIZAÇÃO ===');
             console.log('parametrosFiscais.creditos após validação:', 
                 JSON.stringify(resultado.parametrosFiscais.creditos, null, 2));
         }
 
-        if (resultado.parametrosFiscais && resultado.parametrosFiscais.composicaoTributaria && 
-            resultado.parametrosFiscais.composicaoTributaria.creditos) {
-            console.log('parametrosFiscais.composicaoTributaria.creditos após validação:', 
-                JSON.stringify(resultado.parametrosFiscais.composicaoTributaria.creditos, null, 2));
-        }
-        
+        // Armazenar no cache
+        ValidationCache.set(dados, resultado);
+
         return resultado;
+    }
+    
+    /**
+     * Validação otimizada para seção empresa
+     */
+    function validarEmpresaOtimizada(empresa) {
+        if (typeof empresa.faturamento === 'string') {
+            empresa.faturamento = parseFloat(empresa.faturamento.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+        }
+
+        if (empresa.margem > 1) {
+            empresa.margem = empresa.margem / 100;
+        }
+
+        empresa.faturamento = Math.max(0, empresa.faturamento || 0);
+        empresa.margem = Math.max(0, Math.min(1, empresa.margem || 0));
+
+        // Validação rápida de enums
+        const tiposValidos = ['comercio', 'industria', 'servicos'];
+        if (!tiposValidos.includes(empresa.tipoEmpresa)) {
+            empresa.tipoEmpresa = '';
+        }
+
+        const regimesValidos = ['simples', 'presumido', 'real'];
+        if (!regimesValidos.includes(empresa.regime)) {
+            empresa.regime = '';
+        }
+    }
+
+    /**
+     * Validação otimizada para ciclo financeiro
+     */
+    function validarCicloFinanceiroOtimizado(ciclo) {
+        ciclo.pmr = Math.max(0, ciclo.pmr || 0);
+        ciclo.pmp = Math.max(0, ciclo.pmp || 0);
+        ciclo.pme = Math.max(0, ciclo.pme || 0);
+
+        // Normalizar percentuais
+        if (ciclo.percVista > 1) ciclo.percVista = ciclo.percVista / 100;
+        if (ciclo.percPrazo > 1) ciclo.percPrazo = ciclo.percPrazo / 100;
+
+        ciclo.percVista = Math.max(0, Math.min(1, ciclo.percVista || 0.3));
+        ciclo.percPrazo = Math.max(0, Math.min(1, ciclo.percPrazo || 0.7));
+
+        // Ajustar soma para 1 apenas se necessário
+        const soma = ciclo.percVista + ciclo.percPrazo;
+        if (Math.abs(soma - 1) > 0.01) {
+            if (soma === 0) {
+                ciclo.percVista = 0.3;
+                ciclo.percPrazo = 0.7;
+            } else {
+                ciclo.percVista = ciclo.percVista / soma;
+                ciclo.percPrazo = ciclo.percPrazo / soma;
+            }
+        }
+    }
+
+    /**
+     * Validação otimizada para parâmetros fiscais
+     */
+    function validarParametrosFiscaisOtimizado(params) {
+        if (params.aliquota > 1) {
+            params.aliquota = params.aliquota / 100;
+        }
+        params.aliquota = Math.max(0, Math.min(1, params.aliquota || 0.265));
+
+        // Validar créditos apenas se existirem
+        if (!params.creditos) {
+            params.creditos = {...estruturaPadrao.parametrosFiscais.creditos};
+        } else {
+            // Validação rápida dos créditos
+            Object.keys(estruturaPadrao.parametrosFiscais.creditos).forEach(key => {
+                if (params.creditos[key] === undefined) {
+                    params.creditos[key] = 0;
+                } else if (typeof params.creditos[key] === 'string') {
+                    params.creditos[key] = parseFloat(params.creditos[key].replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+                }
+                params.creditos[key] = Math.max(0, params.creditos[key]);
+            });
+        }
+    }
+
+    /**
+     * Aplica validações rápidas para outras seções
+     */
+    function aplicarValidacoesRapidas(resultado) {
+        // Parâmetros de Simulação
+        if (!resultado.parametrosSimulacao) {
+            resultado.parametrosSimulacao = {...estruturaPadrao.parametrosSimulacao};
+        }
+
+        // Parâmetros Financeiros
+        if (!resultado.parametrosFinanceiros) {
+            resultado.parametrosFinanceiros = {...estruturaPadrao.parametrosFinanceiros};
+        }
+
+        // IVA Config
+        if (!resultado.ivaConfig) {
+            resultado.ivaConfig = {...estruturaPadrao.ivaConfig};
+        }
+
+        // Estratégias
+        if (!resultado.estrategias) {
+            resultado.estrategias = JSON.parse(JSON.stringify(estruturaPadrao.estrategias));
+        }
+
+        // Cronograma
+        if (!resultado.cronogramaImplementacao) {
+            resultado.cronogramaImplementacao = {...estruturaPadrao.cronogramaImplementacao};
+        }
     }
     
     /**
@@ -1333,19 +1250,57 @@ window.DataManager = (function() {
     }
     
     /**
-     * Função de log para transformações de dados
+     * Função de log otimizada para transformações de dados
      * @param {Object} origem - Dados de origem
      * @param {Object} destino - Dados resultantes
      * @param {string} contexto - Descrição do contexto da transformação
      */
     function logTransformacao(origem, destino, contexto) {
-        // Verificar se modo debug está ativo
-        if (window.DEBUG_MODE) {
+        // Verificar se modo debug está ativo e se não é uma transformação repetitiva
+        if (window.DEBUG_MODE && !isTransformacaoRepetitiva(origem, contexto)) {
             console.group(`Transformação de Dados: ${contexto}`);
-            console.log('Origem:', origem);
-            console.log('Destino:', destino);
+            console.log('Origem (resumo):', summarizeData(origem));
+            console.log('Destino (resumo):', summarizeData(destino));
             console.groupEnd();
         }
+    }
+
+    /**
+     * Verifica se é uma transformação repetitiva para evitar logs desnecessários
+     */
+    function isTransformacaoRepetitiva(dados, contexto) {
+        const key = `${contexto}_${JSON.stringify(dados)}`;
+        const now = Date.now();
+
+        if (!window._lastTransformations) {
+            window._lastTransformations = new Map();
+        }
+
+        const last = window._lastTransformations.get(key);
+        if (last && (now - last) < 5000) { // Menos de 5 segundos
+            return true;
+        }
+
+        window._lastTransformations.set(key, now);
+        return false;
+    }
+
+    /**
+     * Cria um resumo dos dados para logs mais limpos
+     */
+    function summarizeData(dados) {
+        if (!dados || typeof dados !== 'object') return dados;
+
+        const summary = {};
+        Object.keys(dados).forEach(key => {
+            if (typeof dados[key] === 'object' && dados[key] !== null) {
+                summary[key] = `{${Object.keys(dados[key]).length} propriedades}`;
+            } else {
+                summary[key] = dados[key];
+            }
+        });
+
+        return summary;
     }
     
     /**
@@ -1383,7 +1338,21 @@ window.DataManager = (function() {
         preservarDadosSped,
         obterMapeamentoCamposCriticos,
         ValidacoesCentralizadas,
-        UtilitariosMat
+        UtilitariosMat,
+        
+        // Novos métodos para otimização
+        limparCache: ValidationCache.clear,
+        obterEstatisticasCache: function() {
+            return {
+                tamanhoCache: ValidationCache.size || 0,
+                ultimaLimpeza: ValidationCache.lastClear || 'Nunca'
+            };
+        },
+
+        // Método para validação forçada (bypass do cache)
+        validarENormalizarForcado: function(dados) {
+            return validarENormalizar(dados, true);
+        }
     };
 })();
 
