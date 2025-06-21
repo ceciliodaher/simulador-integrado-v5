@@ -416,7 +416,15 @@ const SimuladorFluxoCaixa = {
             const dadosAninhados = window.DataManager.obterDadosDoFormulario();
             const dadosPlanos = window.DataManager.converterParaEstruturaPlana(dadosAninhados);
 
-            // 3. Filtrar estratégias ativas diretamente
+            // 3. Obter ano de visualização para estratégias
+            const seletorAnoEstrategias = document.getElementById('ano-visualizacao-estrategias');
+            const anoEstrategias = seletorAnoEstrategias ? 
+                parseInt(seletorAnoEstrategias.value) : 
+                parseInt(dadosPlanos.dataInicial?.split('-')[0], 10) || 2026;
+
+            console.log(`Simulando estratégias para o ano: ${anoEstrategias}`);
+
+            // 4. Filtrar estratégias ativas diretamente
             const estrategiasAtivas = {};
             let temEstrategiaAtiva = false;
 
@@ -429,7 +437,7 @@ const SimuladorFluxoCaixa = {
                 });
             }
 
-            // 4. Tratar caso sem estratégias
+            // 5. Tratar caso sem estratégias
             if (!temEstrategiaAtiva) {
                 const divResultados = document.getElementById('resultados-estrategias');
                 if (divResultados) {
@@ -442,24 +450,35 @@ const SimuladorFluxoCaixa = {
                 };
             }
 
-            // 5. Calcular efetividade diretamente
+            // 6. Calcular efetividade para o ano específico das estratégias
             const impactoBase = window.IVADualSystem.calcularImpactoCapitalGiro(
                 dadosPlanos,
-                parseInt(dadosPlanos.dataInicial?.split('-')[0], 10) || 2026
+                anoEstrategias
             );
 
             const resultadoEstrategias = window.IVADualSystem.calcularEfeitividadeMitigacao(
                 dadosPlanos,
                 estrategiasAtivas,
-                parseInt(dadosPlanos.dataInicial?.split('-')[0], 10) || 2026
+                anoEstrategias
             );
 
-            // 6. Atualizar interface diretamente
-            this._atualizarInterfaceEstrategias(resultadoEstrategias, impactoBase);
+            // 7. Armazenar resultados globais para uso em outras funções
+            window.lastStrategyResults = resultadoEstrategias;
+            window.lastStrategyYear = anoEstrategias;
 
-            // 7. Atualizar gráficos se disponível
-            if (typeof window.ChartManager?.renderizarGraficoEstrategias === 'function') {
+            // 8. CORREÇÃO: Usar função do main.js em vez de função removida
+            if (typeof window.atualizarInterfaceEstrategiasParaAno === 'function') {
+                window.atualizarInterfaceEstrategiasParaAno(resultadoEstrategias, impactoBase, anoEstrategias);
+            } else {
+                // Fallback para função original se a nova não estiver disponível
+                this._atualizarInterfaceEstrategias(resultadoEstrategias, impactoBase);
+            }
+
+            // 9. Atualizar gráficos se disponível
+            if (typeof window.ChartManager !== 'undefined' && typeof window.ChartManager.renderizarGraficoEstrategias === 'function') {
                 window.ChartManager.renderizarGraficoEstrategias(resultadoEstrategias, impactoBase);
+            } else {
+                console.warn('ChartManager não encontrado ou função renderizarGraficoEstrategias indisponível');
             }
 
             return resultadoEstrategias;
@@ -469,6 +488,64 @@ const SimuladorFluxoCaixa = {
             alert('Ocorreu um erro durante a simulação de estratégias: ' + erro.message);
             return null;
         }
+    },
+
+    /**
+     * Atualiza interface de estratégias de forma otimizada com informações do ano
+     * @private
+     * @param {Object} resultadoEstrategias - Resultado das estratégias
+     * @param {Object} impactoBase - Impacto base
+     * @param {number} ano - Ano de referência
+     */
+    _atualizarInterfaceEstrategiasComAno(resultadoEstrategias, impactoBase, ano) {
+        const divResultados = document.getElementById('resultados-estrategias');
+        if (!divResultados) return;
+
+        const impactoOriginal = Math.abs(impactoBase.diferencaCapitalGiro || 0);
+        const efetividade = resultadoEstrategias.efeitividadeCombinada;
+        const percentualImplementacao = window.CurrentTaxSystem.obterPercentualImplementacao(ano);
+
+        // Template otimizado com informações específicas do ano
+        const htmlTemplate = `
+            <div class="estrategias-resumo">
+                <div class="ano-contexto">
+                    <h4>Resultados das Estratégias - Ano ${ano}</h4>
+                    <div class="contexto-implementacao">
+                        <span class="badge badge-info">Implementação Split Payment: ${(percentualImplementacao * 100).toFixed(0)}%</span>
+                    </div>
+                </div>
+                <div class="resultados-principais">
+                    <div class="resultado-destaque">
+                        <label>Impacto Original (${ano}):</label>
+                        <span class="valor-destaque negativo">${window.CalculationCore.formatarMoeda(impactoOriginal)}</span>
+                    </div>
+                    <div class="resultado-destaque">
+                        <label>Efetividade da Mitigação:</label>
+                        <span class="valor-destaque positivo">${(efetividade.efetividadePercentual || 0).toFixed(1)}%</span>
+                    </div>
+                </div>
+                <div class="resultados-detalhados">
+                    <div class="resultado-linha">
+                        <span class="label">Impacto Mitigado:</span>
+                        <span class="valor positivo">${window.CalculationCore.formatarMoeda(efetividade.mitigacaoTotal || 0)}</span>
+                    </div>
+                    <div class="resultado-linha">
+                        <span class="label">Impacto Residual:</span>
+                        <span class="valor">${window.CalculationCore.formatarMoeda(impactoOriginal - (efetividade.mitigacaoTotal || 0))}</span>
+                    </div>
+                    <div class="resultado-linha">
+                        <span class="label">Custo Total:</span>
+                        <span class="valor">${window.CalculationCore.formatarMoeda(efetividade.custoTotal || 0)}</span>
+                    </div>
+                    <div class="resultado-linha">
+                        <span class="label">Relação Custo-Benefício:</span>
+                        <span class="valor">${(efetividade.custoBeneficio || 0).toFixed(2)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        divResultados.innerHTML = htmlTemplate;
     },
     
     /**
